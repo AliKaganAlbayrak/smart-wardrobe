@@ -1,0 +1,16 @@
+# Python virtual environment and bytecode
+.venv/
+__pycache__/
+*.pyc
+
+# IDE settings
+.idea/
+
+# Local application data
+wardrobe.db
+uploads/
+
+# Local environment secrets
+.env
+.env.*
+!.env.example
