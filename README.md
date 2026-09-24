@@ -4,8 +4,8 @@
 
 Smart Wardrobe, kullanıcının kıyafetlerini kaydetmesini ve ileride hava durumu,
 renk uyumu, mevsim ve kişisel tercihlere göre kombin önerileri almasını sağlayacak
-kişisel gardırop uygulamasıdır. Mevcut sürüm, kıyafet kaydetme ve listeleme
-işlemleri için bir REST API sunar.
+kişisel gardırop uygulamasıdır. Mevcut sürüm, kıyafet kaydetme, listeleme ve
+deterministic rule-based kombin önerileri için bir REST API sunar.
 
 ## Current Features
 
@@ -13,6 +13,7 @@ işlemleri için bir REST API sunar.
 - Kayıtlı kıyafetleri listeleme.
 - SQLite veritabanında kalıcı veri saklama.
 - Multipart form verilerinin ve görsel yüklemelerinin desteklenmesi.
+- Açıklanabilir, rule-based ilk kombin öneri motoru.
 - FastAPI tarafından oluşturulan etkileşimli API dokümantasyonu.
 
 | Metot | Endpoint | Açıklama |
@@ -22,6 +23,7 @@ işlemleri için bir REST API sunar.
 | GET | `/clothes` | Kayıtlı kıyafetleri listeler; kategori, renk ve mevsime göre filtrelenebilir. |
 | GET | `/clothes/{clothing_id}` | ID ile tek bir kıyafeti getirir. |
 | DELETE | `/clothes/{clothing_id}` | Kıyafeti ve varsa görselini siler. |
+| GET | `/recommendations` | Kıyafetlerden skorlanmış kombin önerileri üretir. |
 
 ## Tech Stack
 
@@ -115,6 +117,71 @@ Uygulamayı çalıştırdıktan sonra [Swagger UI](http://127.0.0.1:8001/docs)
 ```
 
 ## Roadmap
+
+### Recommendation engine
+
+İlk sürüm AI/LLM kullanmaz; `recommendation.py` içindeki deterministic kurallarla
+çalışır. Bir kombin için bir üst (`tshirt`, `shirt`, `sweater`, `hoodie`), bir
+alt (`pants`, `shorts`) ve `shoes` kategorisi gerekir. Renk uyumu üç çiftin
+(üst-alt, üst-ayakkabı, alt-ayakkabı) ortalamasıyla hesaplanır. Mevsim verilirse
+eşleşen kıyafetler ödüllendirilir, diğerleri penalty alır.
+
+Skor formülü:
+
+```text
+final_score = color_score * 0.7 + season_score * 0.3
+```
+
+Örnek istekler:
+
+```text
+GET /recommendations
+GET /recommendations?season=summer&limit=3
+```
+
+Örnek response:
+
+```json
+{
+  "recommendations": [
+    {
+      "score": 0.9463,
+      "top": {
+        "id": 1,
+        "name": "Beyaz tişört",
+        "category": "shirt",
+        "color": "white",
+        "season": "summer",
+        "image_path": null
+      },
+      "bottom": {
+        "id": 2,
+        "name": "Lacivert pantolon",
+        "category": "pants",
+        "color": "navy",
+        "season": "summer",
+        "image_path": null
+      },
+      "shoes": {
+        "id": 3,
+        "name": "Siyah ayakkabı",
+        "category": "shoes",
+        "color": "black",
+        "season": "summer",
+        "image_path": null
+      },
+      "details": {
+        "color_score": 0.9233,
+        "season_score": 1.0
+      }
+    }
+  ],
+  "message": null
+}
+```
+
+Öneri üretmek için yeterli kategori yoksa server hata vermez; boş liste ve
+eksik kategorileri açıklayan bir `message` döndürür.
 
 - Kıyafet güncelleme ve silme.
 - Hava durumu verilerinin entegrasyonu.
