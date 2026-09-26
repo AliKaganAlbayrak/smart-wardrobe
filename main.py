@@ -1,11 +1,12 @@
 from pathlib import Path
+import json
 from shutil import copyfileobj
 from uuid import uuid4
 
 from fastapi import FastAPI, Depends, File, Form, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import create_engine, String, text
+from sqlalchemy import create_engine, Integer, String, or_, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
 
 from recommendation import build_recommendations, missing_categories
@@ -67,23 +68,80 @@ class ClothingDB(Base):
         nullable=True
     )
 
+    style: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True
+    )
+
+    fit: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True
+    )
+
+    material: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True
+    )
+
+    formality: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True
+    )
+
+    # SQLite stores the multi-value season list as JSON text.
+    seasons: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True
+    )
+
 
 Base.metadata.create_all(bind=engine)
 
 
-def add_image_path_column_if_needed():
-    """Add the new column for databases created by an older application version."""
+def migrate_clothing_metadata_columns():
+    """Add metadata columns and backfill seasons for older SQLite databases."""
     with engine.begin() as connection:
         columns = connection.execute(text("PRAGMA table_info(clothes)"))
         column_names = {column[1] for column in columns}
 
-        if "image_path" not in column_names:
-            connection.execute(
-                text("ALTER TABLE clothes ADD COLUMN image_path VARCHAR(255)")
-            )
+        missing_columns = {
+            "image_path": "VARCHAR(255)",
+            "style": "VARCHAR(50)",
+            "fit": "VARCHAR(50)",
+            "material": "VARCHAR(100)",
+            "formality": "INTEGER",
+            "seasons": "VARCHAR(255)",
+        }
+
+        for column_name, column_type in missing_columns.items():
+            if column_name not in column_names:
+                connection.execute(
+                    text(
+                        f"ALTER TABLE clothes ADD COLUMN "
+                        f"{column_name} {column_type}"
+                    )
+                )
+
+        rows = connection.execute(
+            text("SELECT id, season, seasons FROM clothes")
+        ).fetchall()
+
+        for row in rows:
+            if row[2] is None and row[1]:
+                season_value = row[1].strip().lower()
+                connection.execute(
+                    text(
+                        "UPDATE clothes SET seasons = :seasons "
+                        "WHERE id = :id"
+                    ),
+                    {
+                        "seasons": json.dumps([season_value]),
+                        "id": row[0],
+                    }
+                )
 
 
-add_image_path_column_if_needed()
+migrate_clothing_metadata_columns()
 
 
 # --------------------------------------------------
@@ -99,6 +157,11 @@ class ClothingResponse(BaseModel):
     color: str
     season: str
     image_path: str | None
+    style: str | None = None
+    fit: str | None = None
+    material: str | None = None
+    formality: int | None = None
+    seasons: list[str]
 
 
 class ClothingListResponse(BaseModel):
@@ -131,6 +194,61 @@ class RecommendationResponse(BaseModel):
 class RecommendationListResponse(BaseModel):
     recommendations: list[RecommendationResponse]
     message: str | None = None
+
+
+def normalize_seasons(
+    season: str | None,
+    seasons: list[str] | None
+) -> list[str]:
+    values = []
+
+    if season:
+        values.append(season)
+    for season_value in seasons or []:
+        values.extend(season_value.split(","))
+
+    normalized = []
+    for value in values:
+        value = value.strip().lower()
+        if value and value not in normalized:
+            normalized.append(value)
+
+    if not normalized:
+        raise HTTPException(
+            status_code=422,
+            detail="En az bir season veya seasons değeri gönderilmelidir"
+        )
+
+    return normalized
+
+
+def parse_seasons(item: ClothingDB) -> list[str]:
+    if item.seasons:
+        try:
+            parsed = json.loads(item.seasons)
+            if isinstance(parsed, list):
+                return [str(value) for value in parsed]
+        except json.JSONDecodeError:
+            pass
+
+    return [item.season] if item.season else []
+
+
+def clothing_to_response(item: ClothingDB) -> dict:
+    seasons = parse_seasons(item)
+    return {
+        "id": item.id,
+        "name": item.name,
+        "category": item.category,
+        "color": item.color,
+        "season": item.season or (seasons[0] if seasons else ""),
+        "image_path": item.image_path,
+        "style": item.style,
+        "fit": item.fit,
+        "material": item.material,
+        "formality": item.formality,
+        "seasons": seasons,
+    }
 
 
 # --------------------------------------------------
@@ -172,10 +290,16 @@ def add_clothing(
     name: str = Form(...),
     category: str = Form(...),
     color: str = Form(...),
-    season: str = Form(...),
+    season: str | None = Form(None),
+    seasons: list[str] | None = Form(None),
+    style: str = Form("casual"),
+    fit: str | None = Form(None),
+    material: str | None = Form(None),
+    formality: int = Form(5, ge=1, le=10),
     image: UploadFile | None = File(None),
     db: Session = Depends(get_db)
 ):
+    normalized_seasons = normalize_seasons(season, seasons)
     image_path = None
 
     if image is not None:
@@ -199,8 +323,13 @@ def add_clothing(
         name=name,
         category=category,
         color=color,
-        season=season,
-        image_path=image_path
+        season=normalized_seasons[0],
+        image_path=image_path,
+        style=style,
+        fit=fit,
+        material=material,
+        formality=formality,
+        seasons=json.dumps(normalized_seasons)
     )
 
     db.add(new_item)
@@ -211,14 +340,7 @@ def add_clothing(
 
     return {
         "message": "Kıyafet başarıyla veritabanına kaydedildi",
-        "clothing": {
-            "id": new_item.id,
-            "name": new_item.name,
-            "category": new_item.category,
-            "color": new_item.color,
-            "season": new_item.season,
-            "image_path": new_item.image_path
-        }
+        "clothing": clothing_to_response(new_item)
     }
 
 
@@ -241,17 +363,7 @@ def get_clothes(
     clothes = query.all()
 
     return {
-        "clothes": [
-            {
-                "id": item.id,
-                "name": item.name,
-                "category": item.category,
-                "color": item.color,
-                "season": item.season,
-                "image_path": item.image_path
-            }
-            for item in clothes
-        ]
+        "clothes": [clothing_to_response(item) for item in clothes]
     }
 
 
@@ -265,7 +377,7 @@ def get_clothing(
     if clothing is None:
         raise HTTPException(status_code=404, detail="Kıyafet bulunamadı")
 
-    return clothing
+    return clothing_to_response(clothing)
 
 
 @app.delete("/clothes/{clothing_id}", response_model=ClothingDeleteResponse)
