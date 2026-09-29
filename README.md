@@ -120,11 +120,13 @@ Uygulamayı çalıştırdıktan sonra [Swagger UI](http://127.0.0.1:8001/docs)
 
 ### Recommendation engine
 
-İlk sürüm AI/LLM kullanmaz; `recommendation.py` içindeki deterministic kurallarla
-çalışır. Bir kombin için bir üst (`tshirt`, `shirt`, `sweater`, `hoodie`), bir
-alt (`pants`, `shorts`) ve `shoes` kategorisi gerekir. Renk uyumu üç çiftin
-(üst-alt, üst-ayakkabı, alt-ayakkabı) ortalamasıyla hesaplanır. Mevsim verilirse
-eşleşen kıyafetler ödüllendirilir, diğerleri penalty alır.
+Motor AI/LLM kullanmaz; `app/services/recommendation.py` içindeki deterministic
+kurallarla çalışır. Bir kombin için bir üst (`tshirt`, `shirt`, `polo`,
+`sweater`, `hoodie`), bir alt (`pants`, `jeans`, `shorts`) ve `shoes` kategorisi
+gerekir. `jacket` şimdilik katmanlı kombinlere dahil edilmez. Renk uyumu üç
+çiftin (üst-alt, üst-ayakkabı, alt-ayakkabı) ortalamasıyla hesaplanır. Kıyafetin
+`seasons` listesi kullanılır; eski kayıtlar için tekil `season` alanına fallback
+yapılır. `all-season` değeri tüm mevsimlerde kısmi uyumluluk sağlar.
 
 Skor formülü:
 
@@ -138,6 +140,10 @@ final_score = color_score * 0.7 + season_score * 0.3
 GET /recommendations
 GET /recommendations?season=summer&limit=3
 ```
+
+`season` için desteklenen değerler `spring`, `summer`, `autumn`/`fall` ve
+`winter` değerleridir. `limit` değeri 1 ile 20 arasında olmalıdır; varsayılan
+değer 3, maksimum değer 20'dir. Geçersiz season veya limit değeri `422` döner.
 
 Örnek response:
 

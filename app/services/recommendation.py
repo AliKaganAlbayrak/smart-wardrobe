@@ -1,13 +1,41 @@
 """Deterministic, rule-based clothing recommendation engine."""
 
+import json
 from itertools import product
 from typing import Any, Iterable
 
 
-TOP_CATEGORIES = {"tshirt", "shirt", "sweater", "hoodie"}
-BOTTOM_CATEGORIES = {"pants", "shorts"}
+CATEGORY_ALIASES = {
+    "tshirt": {"tshirt", "t-shirt", "tee"},
+    "shirt": {"shirt"},
+    "polo": {"polo"},
+    "sweater": {"sweater"},
+    "hoodie": {"hoodie"},
+    "pants": {"pants", "trousers"},
+    "jeans": {"jeans", "denim"},
+    "shorts": {"shorts"},
+    "shoes": {"shoes", "shoe", "sneakers", "sneaker"},
+    "jacket": {"jacket", "coat"},
+}
+
+TOP_CATEGORIES = {"tshirt", "shirt", "polo", "sweater", "hoodie"}
+BOTTOM_CATEGORIES = {"pants", "jeans", "shorts"}
 SHOES_CATEGORY = "shoes"
-SUPPORTED_CATEGORIES = TOP_CATEGORIES | BOTTOM_CATEGORIES | {SHOES_CATEGORY, "jacket"}
+SUPPORTED_CATEGORIES = set(CATEGORY_ALIASES)
+
+SEASON_ALIASES = {
+    "spring": "spring",
+    "summer": "summer",
+    "autumn": "autumn",
+    "fall": "autumn",
+    "winter": "winter",
+    "all": "all-season",
+    "any": "all-season",
+    "all-season": "all-season",
+    "all season": "all-season",
+}
+SUPPORTED_SEASONS = set(SEASON_ALIASES.values())
+MAX_RECOMMENDATION_LIMIT = 20
 
 SUPPORTED_COLORS = {
     "black", "white", "gray", "cream", "beige", "brown",
@@ -40,6 +68,47 @@ def _value(clothing: Any, field: str) -> Any:
     if isinstance(clothing, dict):
         return clothing.get(field)
     return getattr(clothing, field, None)
+
+
+def normalize_category(category: str | None) -> str:
+    normalized = " ".join((category or "").strip().lower().split())
+    for canonical, aliases in CATEGORY_ALIASES.items():
+        if normalized in aliases:
+            return canonical
+    return "unknown"
+
+
+def normalize_season(season: str | None) -> str:
+    normalized = " ".join((season or "").strip().lower().split())
+    return SEASON_ALIASES.get(normalized, "unknown")
+
+
+def validate_requested_season(season: str | None) -> str | None:
+    if season is None or not season.strip():
+        return None
+    normalized = normalize_season(season)
+    if normalized == "unknown":
+        supported = ", ".join(sorted(SUPPORTED_SEASONS))
+        raise ValueError(f"Desteklenmeyen season değeri. Desteklenen değerler: {supported}")
+    return normalized
+
+
+def _season_values(clothing: Any) -> list[str]:
+    raw_seasons = _value(clothing, "seasons")
+    if isinstance(raw_seasons, str):
+        try:
+            raw_seasons = json.loads(raw_seasons)
+        except json.JSONDecodeError:
+            raw_seasons = None
+
+    if isinstance(raw_seasons, (list, tuple, set)):
+        values = [normalize_season(str(value)) for value in raw_seasons]
+        values = [value for value in values if value != "unknown"]
+        if values:
+            return values
+
+    legacy_season = normalize_season(_value(clothing, "season"))
+    return [] if legacy_season == "unknown" else [legacy_season]
 
 
 def normalize_color(color: str | None) -> str:
@@ -75,17 +144,24 @@ def color_compatibility_score(first_color: str | None, second_color: str | None)
 def season_compatibility_score(
     clothing_season: str | None,
     requested_season: str | None,
+    clothing_seasons: Iterable[str] | None = None,
 ) -> float:
-    """Return a season score; no requested season means no penalty."""
+    """Return a season score using multi-season data with legacy fallback."""
+    requested_value = normalize_season(requested_season)
     if not requested_season:
         return 1.0
+    if requested_value == "unknown":
+        return 0.35
 
-    clothing_value = (clothing_season or "").strip().lower()
-    requested_value = requested_season.strip().lower()
+    values = list(clothing_seasons or [])
+    if not values:
+        legacy_value = normalize_season(clothing_season)
+        values = [] if legacy_value == "unknown" else [legacy_value]
+    normalized_values = {normalize_season(value) for value in values}
 
-    if clothing_value == requested_value:
+    if requested_value in normalized_values:
         return 1.0
-    if clothing_value in {"all", "any", "all-season", "all season"}:
+    if "all-season" in normalized_values:
         return 0.85
     return 0.35
 
@@ -101,9 +177,9 @@ def _color_score(top: Any, bottom: Any, shoes: Any) -> float:
 
 def _season_score(top: Any, bottom: Any, shoes: Any, season: str | None) -> float:
     scores = (
-        season_compatibility_score(_value(top, "season"), season),
-        season_compatibility_score(_value(bottom, "season"), season),
-        season_compatibility_score(_value(shoes, "season"), season),
+        season_compatibility_score(_value(top, "season"), season, _season_values(top)),
+        season_compatibility_score(_value(bottom, "season"), season, _season_values(bottom)),
+        season_compatibility_score(_value(shoes, "season"), season, _season_values(shoes)),
     )
     return sum(scores) / len(scores)
 
@@ -111,7 +187,7 @@ def _season_score(top: Any, bottom: Any, shoes: Any, season: str | None) -> floa
 def _category_items(clothes: Iterable[Any], categories: set[str]) -> list[Any]:
     return [
         clothing for clothing in clothes
-        if str(_value(clothing, "category") or "").strip().lower() in categories
+        if normalize_category(_value(clothing, "category")) in categories
     ]
 
 
@@ -134,6 +210,7 @@ def build_recommendations(
 ) -> list[dict[str, Any]]:
     """Build and rank combinations from supplied clothing objects only."""
     clothes = list(clothes)
+    season = validate_requested_season(season)
     if limit <= 0:
         return []
 
