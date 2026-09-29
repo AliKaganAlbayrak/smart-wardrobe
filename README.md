@@ -69,7 +69,7 @@ Python 3.10 veya üzeri önerilir. Terminali proje kök dizininde açın.
 Proje kök dizininde, sanal ortam etkin durumdayken geliştirme sunucusunu başlatın:
 
 ```sh
-python -m uvicorn main:app --reload
+python -m uvicorn app.main:app --reload
 ```
 
 - [API ana sayfası](http://127.0.0.1:8000/)
@@ -113,7 +113,7 @@ Uygulamayı çalıştırdıktan sonra [Swagger UI](http://127.0.0.1:8001/docs)
 Çalıştırma komutu:
 
 ```powershell
-..\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8001
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8001
 ```
 
 ## Roadmap

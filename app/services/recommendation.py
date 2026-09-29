@@ -19,7 +19,6 @@ EARTH_TONE_COLORS = {"beige", "brown", "cream", "olive", "green"}
 COLOR_WEIGHT = 0.7
 SEASON_WEIGHT = 0.3
 
-# Explicit pair scores make the most important combinations easy to extend.
 COLOR_PAIR_SCORES = {
     frozenset({"black", "white"}): 0.96,
     frozenset({"black", "gray"}): 0.94,

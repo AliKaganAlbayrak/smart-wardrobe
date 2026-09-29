@@ -1,0 +1,1 @@
+"""Smart Wardrobe application package."""
