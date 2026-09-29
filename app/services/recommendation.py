@@ -37,21 +37,52 @@ SEASON_ALIASES = {
 SUPPORTED_SEASONS = set(SEASON_ALIASES.values())
 MAX_RECOMMENDATION_LIMIT = 20
 
-SUPPORTED_COLORS = {
-    "black", "white", "gray", "cream", "beige", "brown",
-    "navy", "blue", "green", "olive", "red", "burgundy",
+COLOR_ALIASES = {
+    "black": {"black", "siyah"},
+    "white": {"white", "beyaz"},
+    "cream": {"cream", "krem"},
+    "khaki": {"khaki", "haki"},
+    "brown": {"brown", "kahverengi"},
+    "navy": {"navy", "lacivert"},
+    "gray": {"gray", "grey", "gri"},
+    "ice_blue": {"ice blue", "ice_blue", "buz mavisi"},
+    "beige": {"beige", "bej"},
+    "blue": {"blue", "mavi"},
+    "green": {"green", "yeşil", "yesil"},
+    "olive": {"olive", "zeytin"},
+    "red": {"red", "kırmızı", "kirmizi"},
+    "burgundy": {"burgundy", "bordo"},
 }
+SUPPORTED_COLORS = set(COLOR_ALIASES)
 NEUTRAL_COLORS = {"black", "white", "gray", "cream", "beige"}
-EARTH_TONE_COLORS = {"beige", "brown", "cream", "olive", "green"}
+EARTH_TONE_COLORS = {"beige", "brown", "cream", "khaki", "olive", "green"}
 
-COLOR_WEIGHT = 0.7
-SEASON_WEIGHT = 0.3
+COLOR_WEIGHT = 0.35
+SEASON_WEIGHT = 0.25
+STYLE_WEIGHT = 0.25
+FORMALITY_WEIGHT = 0.15
+
+STYLE_ALIASES = {
+    "casual": {"casual"},
+    "smart_casual": {"smart_casual", "smart casual"},
+    "formal": {"formal"},
+    "sport": {"sport", "sporty"},
+}
+STYLE_PAIR_SCORES = {
+    frozenset({"casual", "smart_casual"}): 0.80,
+    frozenset({"casual", "sport"}): 0.75,
+    frozenset({"smart_casual", "formal"}): 0.75,
+    frozenset({"smart_casual", "sport"}): 0.55,
+    frozenset({"casual", "formal"}): 0.45,
+    frozenset({"formal", "sport"}): 0.35,
+}
 
 COLOR_PAIR_SCORES = {
     frozenset({"black", "white"}): 0.96,
     frozenset({"black", "gray"}): 0.94,
     frozenset({"white", "navy"}): 0.93,
     frozenset({"navy", "blue"}): 0.86,
+    frozenset({"blue", "ice_blue"}): 0.86,
     frozenset({"navy", "burgundy"}): 0.84,
     frozenset({"blue", "green"}): 0.76,
     frozenset({"burgundy", "olive"}): 0.78,
@@ -112,8 +143,14 @@ def _season_values(clothing: Any) -> list[str]:
 
 
 def normalize_color(color: str | None) -> str:
-    normalized = (color or "").strip().lower()
-    return normalized if normalized in SUPPORTED_COLORS else "unknown"
+    normalized = " ".join((color or "").strip().lower().replace("_", " ").split())
+    for canonical, aliases in COLOR_ALIASES.items():
+        normalized_aliases = {
+            " ".join(alias.replace("_", " ").split()) for alias in aliases
+        }
+        if normalized in normalized_aliases:
+            return canonical
+    return "unknown"
 
 
 def color_compatibility_score(first_color: str | None, second_color: str | None) -> float:
@@ -139,6 +176,44 @@ def color_compatibility_score(first_color: str | None, second_color: str | None)
         return 0.90
 
     return 0.62
+
+
+def normalize_style(style: str | None) -> str:
+    normalized = " ".join(
+        (style or "").strip().lower().replace("-", " ").replace("_", " ").split()
+    )
+    for canonical, aliases in STYLE_ALIASES.items():
+        normalized_aliases = {
+            " ".join(alias.replace("_", " ").split()) for alias in aliases
+        }
+        if normalized in normalized_aliases:
+            return canonical
+    return "unknown"
+
+
+def style_compatibility_score(
+    first_style: str | None,
+    second_style: str | None,
+) -> float:
+    """Return a neutral fallback when either style value is missing."""
+    first = normalize_style(first_style)
+    second = normalize_style(second_style)
+    if "unknown" in {first, second}:
+        return 0.5
+    if first == second:
+        return 1.0
+    return STYLE_PAIR_SCORES.get(frozenset({first, second}), 0.5)
+
+
+def formality_compatibility_score(
+    first_formality: int | None,
+    second_formality: int | None,
+) -> float:
+    """Compare 1-10 formality values; missing metadata gets a neutral score."""
+    if first_formality is None or second_formality is None:
+        return 0.5
+    difference = abs(first_formality - second_formality)
+    return max(0.0, min(1.0, 1.0 - (difference / 9.0)))
 
 
 def season_compatibility_score(
@@ -184,6 +259,82 @@ def _season_score(top: Any, bottom: Any, shoes: Any, season: str | None) -> floa
     return sum(scores) / len(scores)
 
 
+def _style_score(top: Any, bottom: Any, shoes: Any) -> float:
+    pair_scores = (
+        style_compatibility_score(_value(top, "style"), _value(bottom, "style")),
+        style_compatibility_score(_value(top, "style"), _value(shoes, "style")),
+        style_compatibility_score(_value(bottom, "style"), _value(shoes, "style")),
+    )
+    return sum(pair_scores) / len(pair_scores)
+
+
+def _formality_score(top: Any, bottom: Any, shoes: Any) -> float:
+    pair_scores = (
+        formality_compatibility_score(
+            _value(top, "formality"), _value(bottom, "formality")
+        ),
+        formality_compatibility_score(
+            _value(top, "formality"), _value(shoes, "formality")
+        ),
+        formality_compatibility_score(
+            _value(bottom, "formality"), _value(shoes, "formality")
+        ),
+    )
+    return sum(pair_scores) / len(pair_scores)
+
+
+def _metadata_missing(items: Iterable[Any], field: str) -> bool:
+    return any(_value(item, field) in (None, "") for item in items)
+
+
+def _build_explanation(
+    top: Any,
+    bottom: Any,
+    shoes: Any,
+    season: str | None,
+    color_score: float,
+    season_score: float,
+    style_score: float,
+    formality_score: float,
+) -> tuple[list[str], list[str]]:
+    items = (top, bottom, shoes)
+    reasons = []
+    penalties = []
+
+    if color_score >= 0.85:
+        reasons.append(f"Renk uyumu yüksek ({color_score:.2f}).")
+    elif color_score < 0.5:
+        penalties.append(f"Renk uyumu düşük ({color_score:.2f}).")
+    if any(normalize_color(_value(item, "color")) == "unknown" for item in items):
+        penalties.append("Bilinmeyen renk için tarafsız fallback uygulandı.")
+
+    if season is not None:
+        if season_score >= 0.85:
+            reasons.append(f"Mevsim uyumu yüksek ({season_score:.2f}).")
+        elif season_score < 0.5:
+            penalties.append(f"Mevsim uyumu düşük ({season_score:.2f}).")
+        if _metadata_missing(items, "season") and any(
+            not _season_values(item) for item in items
+        ):
+            penalties.append("Eksik mevsim metadata'sı için penalty uygulandı.")
+
+    if _metadata_missing(items, "style"):
+        penalties.append("Eksik stil metadata'sı için tarafsız skor kullanıldı.")
+    elif style_score >= 0.8:
+        reasons.append(f"Stil uyumu yüksek ({style_score:.2f}).")
+    elif style_score < 0.6:
+        penalties.append(f"Stil uyumu düşük ({style_score:.2f}).")
+
+    if _metadata_missing(items, "formality"):
+        penalties.append("Eksik resmiyet metadata'sı için tarafsız skor kullanıldı.")
+    elif formality_score >= 0.8:
+        reasons.append(f"Resmiyet seviyeleri uyumlu ({formality_score:.2f}).")
+    elif formality_score < 0.6:
+        penalties.append(f"Resmiyet seviyeleri uzak ({formality_score:.2f}).")
+
+    return reasons, penalties
+
+
 def _category_items(clothes: Iterable[Any], categories: set[str]) -> list[Any]:
     return [
         clothing for clothing in clothes
@@ -222,15 +373,38 @@ def build_recommendations(
     for top, bottom, shoe in product(tops, bottoms, shoes):
         color_score = _color_score(top, bottom, shoe)
         season_score = _season_score(top, bottom, shoe, season)
-        final_score = (color_score * COLOR_WEIGHT) + (season_score * SEASON_WEIGHT)
+        style_score = _style_score(top, bottom, shoe)
+        formality_score = _formality_score(top, bottom, shoe)
+        final_score = (
+            (color_score * COLOR_WEIGHT)
+            + (season_score * SEASON_WEIGHT)
+            + (style_score * STYLE_WEIGHT)
+            + (formality_score * FORMALITY_WEIGHT)
+        )
+        reasons, penalties = _build_explanation(
+            top,
+            bottom,
+            shoe,
+            season,
+            color_score,
+            season_score,
+            style_score,
+            formality_score,
+        )
+        rounded_score = round(max(0.0, min(1.0, final_score)), 4)
         recommendations.append({
-            "score": round(final_score, 4),
+            "score": rounded_score,
             "top": top,
             "bottom": bottom,
             "shoes": shoe,
             "details": {
                 "color_score": round(color_score, 4),
                 "season_score": round(season_score, 4),
+                "style_score": round(style_score, 4),
+                "formality_score": round(formality_score, 4),
+                "total_score": rounded_score,
+                "reasons": reasons,
+                "penalties": penalties,
             },
         })
 

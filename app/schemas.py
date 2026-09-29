@@ -34,6 +34,11 @@ class ClothingDeleteResponse(BaseModel):
 class RecommendationDetails(BaseModel):
     color_score: float
     season_score: float
+    style_score: float
+    formality_score: float
+    total_score: float
+    reasons: list[str]
+    penalties: list[str]
 
 
 class RecommendationResponse(BaseModel):

@@ -126,12 +126,18 @@ kurallarla çalışır. Bir kombin için bir üst (`tshirt`, `shirt`, `polo`,
 gerekir. `jacket` şimdilik katmanlı kombinlere dahil edilmez. Renk uyumu üç
 çiftin (üst-alt, üst-ayakkabı, alt-ayakkabı) ortalamasıyla hesaplanır. Kıyafetin
 `seasons` listesi kullanılır; eski kayıtlar için tekil `season` alanına fallback
-yapılır. `all-season` değeri tüm mevsimlerde kısmi uyumluluk sağlar.
+yapılır. `all-season` değeri tüm mevsimlerde kısmi uyumluluk sağlar. Renk, stil
+ve resmiyet metadata'sı eksik olduğunda tarafsız fallback uygulanır.
 
 Skor formülü:
 
 ```text
-final_score = color_score * 0.7 + season_score * 0.3
+total_score = (
+    color_score * 0.35
+    + season_score * 0.25
+    + style_score * 0.25
+    + formality_score * 0.15
+)
 ```
 
 Örnek istekler:
@@ -178,7 +184,15 @@ değer 3, maksimum değer 20'dir. Geçersiz season veya limit değeri `422` dön
       },
       "details": {
         "color_score": 0.9233,
-        "season_score": 1.0
+        "season_score": 1.0,
+        "style_score": 0.8,
+        "formality_score": 0.8889,
+        "total_score": 0.9065,
+        "reasons": [
+          "Renk uyumu yüksek (0.92).",
+          "Mevsim uyumu yüksek (1.00)."
+        ],
+        "penalties": []
       }
     }
   ],
