@@ -5,7 +5,8 @@
 Smart Wardrobe, kullanıcının kıyafetlerini kaydetmesini ve ileride hava durumu,
 renk uyumu, mevsim ve kişisel tercihlere göre kombin önerileri almasını sağlayacak
 kişisel gardırop uygulamasıdır. Mevcut sürüm, kıyafet kaydetme, listeleme ve
-deterministic rule-based kombin önerileri için bir REST API sunar.
+deterministic rule-based kombin önerileri sunan bir REST API ve React web
+arayüzü içerir.
 
 ## Current Features
 
@@ -15,6 +16,7 @@ deterministic rule-based kombin önerileri için bir REST API sunar.
 - Multipart form verilerinin ve görsel yüklemelerinin desteklenmesi.
 - Açıklanabilir, rule-based ilk kombin öneri motoru.
 - FastAPI tarafından oluşturulan etkileşimli API dokümantasyonu.
+- Gardırop, kıyafet ekleme ve açıklanabilir kombin önerileri için responsive web arayüzü.
 
 | Metot | Endpoint | Açıklama |
 | --- | --- | --- |
@@ -33,6 +35,8 @@ deterministic rule-based kombin önerileri için bir REST API sunar.
 - **SQLAlchemy 2.x** — veritabanı modelleri ve erişimi.
 - **Pydantic** — veri doğrulama.
 - **SQLite** — yerel veritabanı; Python ile birlikte gelir.
+- **React + TypeScript** — web arayüzü.
+- **Vite** — frontend geliştirme ve build aracı.
 
 ## Installation
 
@@ -69,12 +73,26 @@ Python 3.10 veya üzeri önerilir. Terminali proje kök dizininde açın.
 Proje kök dizininde, sanal ortam etkin durumdayken geliştirme sunucusunu başlatın:
 
 ```sh
-python -m uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload --port 8001
 ```
 
-- [API ana sayfası](http://127.0.0.1:8000/)
-- [Swagger UI](http://127.0.0.1:8000/docs)
-- [ReDoc](http://127.0.0.1:8000/redoc)
+- [API ana sayfası](http://127.0.0.1:8001/)
+- [Swagger UI](http://127.0.0.1:8001/docs)
+- [ReDoc](http://127.0.0.1:8001/redoc)
+
+## Running the Frontend
+
+Backend'i `8001` portunda çalıştırdıktan sonra ayrı bir terminal açın:
+
+```sh
+cd frontend
+npm install
+npm run dev
+```
+
+Web arayüzü [http://127.0.0.1:5173](http://127.0.0.1:5173) adresinde açılır.
+Development API adresi varsayılan olarak `http://127.0.0.1:8001` değeridir;
+gerekirse `VITE_API_BASE_URL` environment variable ile değiştirilebilir.
 
 Uygulama ilk açılışta `wardrobe.db` dosyasını ve gerekli tabloları otomatik
 oluşturur. Veritabanı ve gelecekte kullanılacak `uploads/` dizini Git'e dahil edilmez.

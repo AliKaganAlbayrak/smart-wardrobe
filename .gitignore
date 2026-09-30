@@ -14,3 +14,11 @@ uploads/
 .env
 .env.*
 !.env.example
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+.pnpm-store/
