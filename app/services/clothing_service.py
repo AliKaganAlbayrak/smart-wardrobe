@@ -1,4 +1,5 @@
 import json
+import logging
 
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import or_
@@ -7,6 +8,8 @@ from sqlalchemy.orm import Session
 from ..models import ClothingDB
 from ..schemas import ClothingUpdate
 from .image_service import delete_image, save_image
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_seasons(
@@ -91,8 +94,17 @@ def create_clothing(
         image_path=save_image(image),
     )
 
-    db.add(new_item)
-    db.commit()
+    try:
+        db.add(new_item)
+        db.commit()
+    except Exception:
+        db.rollback()
+        # Storage and SQL cannot share a transaction; compensate failed inserts.
+        try:
+            delete_image(new_item.image_path)
+        except Exception:
+            logger.error("Image cleanup after failed clothing insert requires manual retry")
+        raise
     db.refresh(new_item)
     return new_item
 
@@ -130,9 +142,14 @@ def get_clothing(db: Session, clothing_id: int) -> ClothingDB:
 
 def delete_clothing(db: Session, clothing_id: int):
     clothing = get_clothing(db, clothing_id)
-    delete_image(clothing.image_path)
-    db.delete(clothing)
-    db.commit()
+    try:
+        db.delete(clothing)
+        db.flush()  # Detect SQL failures before removing the object.
+        delete_image(clothing.image_path)
+        db.commit()
+    except Exception:
+        db.rollback()  # A storage outage must not silently delete the DB record.
+        raise
 
 
 def update_clothing(db: Session, clothing_id: int, update: ClothingUpdate) -> ClothingDB:

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import models  # noqa: F401 - registers ORM models with Base.metadata
-from .config import UPLOADS_DIR, frontend_origins
+from .config import PERSISTENCE, UPLOADS_DIR, frontend_origins
 from .database import initialize_database
 from .routers import clothes, recommendations
 
@@ -24,8 +24,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+if PERSISTENCE.image_storage == "local":
+    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 app.include_router(clothes.router)
 app.include_router(recommendations.router)

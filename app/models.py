@@ -18,5 +18,5 @@ class ClothingDB(Base):
     material: Mapped[str | None] = mapped_column(String(100), nullable=True)
     formality: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # SQLite stores the multi-value season list as JSON text.
+    # JSON text stays portable across SQLite/PostgreSQL and legacy serializers.
     seasons: Mapped[str | None] = mapped_column(String(255), nullable=True)

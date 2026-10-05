@@ -1,19 +1,24 @@
 import json
+from pathlib import Path
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-from .config import DATA_DIR, PROJECT_ROOT
+from .config import DATA_DIR, PERSISTENCE
 
 
-DATA_DIR.mkdir(parents=True, exist_ok=True)
 DATABASE_PATH = DATA_DIR / "wardrobe.db"
-DATABASE_URL = f"sqlite:///{DATABASE_PATH.as_posix()}"
+DATABASE_URL = PERSISTENCE.database_url
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False}
-)
+
+def create_database_engine(url: str):
+    if url.startswith("sqlite:"):
+        return create_engine(url, connect_args={"check_same_thread": False})
+    return create_engine(url, connect_args={"connect_timeout": 10},
+                         pool_pre_ping=True, pool_size=5, max_overflow=0)
+
+
+engine = create_database_engine(DATABASE_URL)
 
 SessionLocal = sessionmaker(
     bind=engine,
@@ -26,53 +31,85 @@ class Base(DeclarativeBase):
     pass
 
 
+def _migrate_metadata(connection):
+    """Add known legacy columns only; never drop, rename or recreate a table."""
+    column_names = {column["name"] for column in inspect(connection).get_columns("clothes")}
+
+    missing_columns = {
+        "image_path": "VARCHAR(255)",
+        "style": "VARCHAR(50)",
+        "fit": "VARCHAR(50)",
+        "material": "VARCHAR(100)",
+        "formality": "INTEGER",
+        "seasons": "VARCHAR(255)",
+    }
+
+    for column_name, column_type in missing_columns.items():
+        if column_name not in column_names:
+            connection.execute(
+                text(
+                    f"ALTER TABLE clothes ADD COLUMN "
+                    f"{column_name} {column_type}"
+                )
+            )
+
+    rows = connection.execute(
+        text("SELECT id, season, seasons FROM clothes WHERE seasons IS NULL")
+    ).fetchall()
+
+    for row in rows:
+        if row[1]:
+            connection.execute(
+                text("UPDATE clothes SET seasons = :seasons WHERE id = :id"),
+                {"seasons": json.dumps([row[1].strip().lower()]), "id": row[0]},
+            )
+
+
 def migrate_clothing_metadata_columns():
-    """Add metadata columns and backfill seasons for older SQLite databases."""
     with engine.begin() as connection:
-        columns = connection.execute(text("PRAGMA table_info(clothes)"))
-        column_names = {column[1] for column in columns}
+        _migrate_metadata(connection)
 
-        missing_columns = {
-            "image_path": "VARCHAR(255)",
-            "style": "VARCHAR(50)",
-            "fit": "VARCHAR(50)",
-            "material": "VARCHAR(100)",
-            "formality": "INTEGER",
-            "seasons": "VARCHAR(255)",
-        }
 
-        for column_name, column_type in missing_columns.items():
-            if column_name not in column_names:
-                connection.execute(
-                    text(
-                        f"ALTER TABLE clothes ADD COLUMN "
-                        f"{column_name} {column_type}"
-                    )
-                )
+def apply_schema_migrations(target_engine=None):
+    """Explicit, transactional bootstrap/additive migration for either database."""
+    from . import models  # noqa: F401 - register models, including CLI entry point
 
-        rows = connection.execute(
-            text("SELECT id, season, seasons FROM clothes")
-        ).fetchall()
+    target_engine = target_engine or engine
+    if target_engine.dialect.name == "sqlite":
+        path = target_engine.url.database
+        if path and path != ":memory:":
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with target_engine.begin() as connection:
+        if target_engine.dialect.name == "postgresql":
+            # Serialize deploy migrations, even if two instances start together.
+            connection.execute(text("SELECT pg_advisory_xact_lock(82471021)"))
+        Base.metadata.create_all(bind=connection)
+        _migrate_metadata(connection)
+        if target_engine.dialect.name == "postgresql":
+            # Supabase's Data API must not expose these tables to anon clients.
+            # SQLAlchemy connects as the table owner; it bypasses RLS as before.
+            connection.execute(text("ALTER TABLE clothes ENABLE ROW LEVEL SECURITY"))
 
-        for row in rows:
-            if row[2] is None and row[1]:
-                season_value = row[1].strip().lower()
-                connection.execute(
-                    text(
-                        "UPDATE clothes SET seasons = :seasons "
-                        "WHERE id = :id"
-                    ),
-                    {
-                        "seasons": json.dumps([season_value]),
-                        "id": row[0],
-                    }
-                )
+
+def validate_database_schema(target_engine=None):
+    target_engine = target_engine or engine
+    inspector = inspect(target_engine)
+    if not inspector.has_table("clothes"):
+        raise RuntimeError("Database schema is missing; run: python -m app.migrate")
+    actual = {column["name"] for column in inspector.get_columns("clothes")}
+    missing = set(Base.metadata.tables["clothes"].columns.keys()) - actual
+    if missing:
+        raise RuntimeError("Database schema is outdated (" + ", ".join(sorted(missing))
+                           + "); run: python -m app.migrate")
 
 
 def initialize_database():
     # Models must be imported before this function is called.
-    Base.metadata.create_all(bind=engine)
-    migrate_clothing_metadata_columns()
+    if engine.dialect.name == "sqlite":
+        apply_schema_migrations()
+    else:
+        # Production startup only checks schema; migration runs explicitly first.
+        validate_database_schema()
 
 
 def get_db():

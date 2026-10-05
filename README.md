@@ -9,7 +9,7 @@ dashboard. No ML, external weather service or authentication is required.
 ## 2. Features
 
 - Clothing CRUD and partial editing via PATCH; metadata and multiple seasons.
-- Multipart image uploads with UUID filenames and static image serving.
+- Multipart image uploads with UUID filenames; local static serving or Supabase Storage.
 - Category, color, season and frontend style filters.
 - Ranked outfits with color, season, style and formality scores and explanations.
 - Responsive cards, edit/confirmation dialogs, image preview, loading/error/retry states.
@@ -36,7 +36,8 @@ Actual local application, using the six existing wardrobe items.
 app/
   main.py, config.py, database.py, models.py, schemas.py
   routers/     clothes.py, recommendations.py
-  services/    clothing_service.py, image_service.py, recommendation.py
+  services/    clothing_service.py, image_service.py, storage.py, recommendation.py
+  migrate.py   explicit production schema bootstrap/additive migrations
 frontend/src/
   components/  reusable forms, cards, dialogs and feedback
   pages/       wardrobe, add clothing, recommendations
@@ -47,13 +48,14 @@ docs/          screenshots, quality audit and deployment runbook
 ```
 
 Routers handle HTTP; services handle storage/business logic. The recommendation
-service works on supplied objects without database access. SQLite and uploads share
-a configurable data directory; local defaults remain at the project root.
+service works on supplied objects without database access. Local SQLite and uploads
+share a configurable data directory; defaults remain at the project root. Production
+uses PostgreSQL via `DATABASE_URL` and Supabase Storage, independent of Render's disk.
 
 ## 5. Tech Stack
 
-Backend: Python, FastAPI, Pydantic, SQLAlchemy 2, SQLite, Uvicorn,
-python-multipart. Frontend: React, TypeScript, Vite and plain CSS. Tests: Python
+Backend: Python, FastAPI, Pydantic, SQLAlchemy 2, SQLite/PostgreSQL (psycopg), Uvicorn,
+python-multipart and httpx (Supabase Storage REST). Frontend: React, TypeScript, Vite and plain CSS. Tests: Python
 unittest, FastAPI TestClient and Node's built-in test runner.
 
 ## 6. Recommendation Engine
@@ -102,7 +104,7 @@ of a summer bottom and cross-request repetition. Fit/material do not affect scor
 | PATCH | `/clothes/{id}` | JSON partial metadata update |
 | DELETE | `/clothes/{id}` | Delete record and associated image |
 | GET | `/recommendations` | Ranked outfits; season/limit queries |
-| GET | `/uploads/{filename}` | Static uploaded image |
+| GET | `/uploads/{filename}` | Local-mode static uploaded image |
 
 POST accepts name, category, color, season/seasons, style, fit, material,
 formality and image. Repeat the multipart `seasons` field for multiple values.
@@ -144,26 +146,28 @@ For lockfile-based installation, use `pnpm install --frozen-lockfile` instead.
 `frontend/.env.example` documents `VITE_API_BASE_URL` (public build-time setting).
 Backend `.env.example` documents `FRONTEND_ORIGINS` and `WARDROBE_DATA_DIR`;
 export these in the shell/hosting dashboard (backend does not auto-load .env files).
+Local defaults require no cloud credentials. `image_path` is `uploads/<uuid>.<ext>`
+locally and a durable public HTTPS URL in Supabase mode; API envelopes are unchanged.
 
 ### Deployment
 
-`render.yaml` supplies the backend start/build/health configuration;
+`render.yaml` supplies the backend migration/start/build/health configuration;
 `netlify.toml` supplies the frontend build/publish configuration and production
 URL check. Set the real HTTPS API URL and frontend CORS origin before deploying.
-No public deployment was provisioned in this sprint: neither hosting dashboard
-was authenticated. See [deployment steps and persistence/safety limits](docs/deployment.md).
+Supabase must be configured manually before deploying these changes. No external
+account or data migration was performed. See [setup, secrets and persistence limits](docs/deployment.md).
 
 Local DB/uploads are deliberately excluded from Git. A fresh cloud deployment is
-empty. Free ephemeral hosting loses local SQLite/uploads on restarts/redeploys;
-durable data needs a persistent disk and backups. Public CRUD has no authentication:
+empty. Production requires PostgreSQL + Supabase Storage; missing settings cause an
+explicit startup error, never fallback to ephemeral local storage. Backups are still
+necessary. The six local records/photos are not automatically transferred. Public CRUD has no authentication:
 publish disposable demo data only, not irreplaceable or private records.
 
 ## 9. Testing
 
 ```powershell
 ..\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-..\.venv\Scripts\python.exe -m unittest discover -s tests -v
-..\.venv\Scripts\python.exe -c "from tests.test_smoke import test_api_smoke_and_metadata_cleanup; test_api_smoke_and_metadata_cleanup()"
+..\.venv\Scripts\python.exe -m tests
 # With the local API running:
 ..\.venv\Scripts\python.exe tests/smoke_live.py
 ```
@@ -174,7 +178,10 @@ npm test
 npm run build
 ```
 
-PATCH tests use in-memory SQLite; deployment tests use temporary storage.
+The test runner isolates all unittest tests in disposable storage, even if cloud
+credentials exist in the shell. Persistence tests exercise CRUD/PATCH/recommendation
+responses with mocked Supabase HTTP plus PostgreSQL config/DDL; live cloud setup
+and redeploy checks remain manual. PATCH tests use in-memory SQLite; deployment tests use temporary storage.
 Live smoke creates/cleans temporary records/photos and compares persistent rows,
 schema and image hashes. UI verification covers add/edit/delete, recommendations,
 loading/error/retry, and 390/768/1024/1440px layouts.
@@ -184,6 +191,7 @@ loading/error/retry, and 390/768/1024/1440px layouts.
 - More precise per-piece explanations and recommendation diversity.
 - Upload size/content hardening and repeatable browser accessibility tests.
 - Pagination and scalable combination ranking for larger wardrobes.
-- Managed storage/database and access controls before multi-user production use.
+- Cloud persistence integration/redeploy verification, backups and access controls
+  before multi-user production use.
 
 This is a portfolio product demo, not a hardened multi-user production service.

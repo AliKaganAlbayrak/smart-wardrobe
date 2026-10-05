@@ -1,17 +1,26 @@
-# Disposable demo by default: free instances have no persistent disk.
-# For durable data, select a paid plan and attach the configured storage path.
+# Free Render filesystem is ephemeral; all production data lives in Supabase.
 services:
   - type: web
     name: smart-wardrobe-api
     runtime: python
     plan: free
     buildCommand: python -m pip install -r requirements.txt
-    startCommand: python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    startCommand: python -m app.migrate && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
     healthCheckPath: /
     envVars:
       - key: PYTHON_VERSION
         value: 3.13.2
-      - key: WARDROBE_DATA_DIR
-        value: /opt/render/project/src/storage
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: IMAGE_STORAGE
+        value: supabase
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: clothing-images
       - key: FRONTEND_ORIGINS
         sync: false

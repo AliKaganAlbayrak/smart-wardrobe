@@ -1,10 +1,11 @@
 from pathlib import Path
-from shutil import copyfileobj
+import re
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile
 
 from ..config import UPLOADS_DIR
+from .storage import get_image_storage
 
 
 def save_image(image: UploadFile | None) -> str | None:
@@ -18,20 +19,14 @@ def save_image(image: UploadFile | None) -> str | None:
         )
 
     extension = Path(image.filename or "").suffix
+    if extension and not re.fullmatch(r"\.[A-Za-z0-9]{1,10}", extension):
+        raise HTTPException(status_code=400, detail="Geçersiz görsel dosyası uzantısı")
     filename = f"{uuid4()}{extension}"
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    saved_file = UPLOADS_DIR / filename
-
-    with saved_file.open("wb") as file:
-        copyfileobj(image.file, file)
-
-    return f"uploads/{filename}"
+    return get_image_storage().save(image, filename)
 
 
 def delete_image(image_path: str | None):
     if not image_path:
         return
 
-    image_file = UPLOADS_DIR / Path(image_path).name
-    if image_file.is_file():
-        image_file.unlink()
+    get_image_storage().delete(image_path)
