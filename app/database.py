@@ -13,9 +13,10 @@ DATABASE_URL = PERSISTENCE.database_url
 
 def create_database_engine(url: str):
     if url.startswith("sqlite:"):
-        return create_engine(url, connect_args={"check_same_thread": False})
+        return create_engine(url, connect_args={"check_same_thread": False}, hide_parameters=True)
     return create_engine(url, connect_args={"connect_timeout": 10},
-                         pool_pre_ping=True, pool_size=5, max_overflow=0)
+                         pool_pre_ping=True, pool_size=5, max_overflow=0,
+                         hide_parameters=True)
 
 
 engine = create_database_engine(DATABASE_URL)

@@ -87,6 +87,14 @@ performing DDL. SQLite retains the existing automatic additive migration behavio
 Back up before any migration. Future structural changes need explicit versioned
 migrations; this small bootstrap is not a general-purpose schema reconciliation tool.
 
+Migration startup logs fixed backend/driver labels and boolean connection metadata,
+not the DSN or credentials. Failures include the exception types, PostgreSQL SQLSTATE
+(when available), and the redacted driver/primary message; SQL parameters, quoted
+values, usernames, encoded/decoded passwords and environment secrets are withheld.
+Config/driver failures are caught before connection attempts as well. Use the
+latest deploy's migration log to distinguish the actual connection or permission
+failure; a healthy old service does not prove the new migration succeeded.
+
 **Existing data is not automatically transferred.** The six local records/photos
 remain untouched and outside Git. A fresh PostgreSQL project starts empty. Before
 entering new production data, deploy this configuration and verify persistence.
