@@ -98,6 +98,53 @@ def _exception_type(error: Exception) -> str:
     return name if re.fullmatch(r"[A-Za-z0-9_.]{1,160}", name) else "Exception"
 
 
+DATABASE_ERROR_CATEGORIES = frozenset({
+    "authentication_failed", "user_not_found", "connection_timeout",
+    "dns_resolution_error", "tls_error", "database_not_found", "host_unreachable",
+    "permission_denied", "lock_timeout", "statement_timeout", "migration_timeout",
+    "database_error",
+})
+
+
+def classify_database_error(error: Exception, sqlstate: str | None, message: str) -> str:
+    """Classify actual driver evidence, not a guess about configuration."""
+    message = message.lower()
+    if "migration timeout" in message:
+        return "migration_timeout"
+    if "tenant or user not found" in message or "user not found" in message or (
+        "role" in message and "does not exist" in message
+    ):
+        return "user_not_found"
+    if sqlstate == "28P01" or "password authentication failed" in message:
+        return "authentication_failed"
+    if sqlstate == "3D000" or ("database" in message and "does not exist" in message):
+        return "database_not_found"
+    if sqlstate == "55P03":
+        return "lock_timeout"
+    if sqlstate == "57014" and "statement timeout" in message:
+        return "statement_timeout"
+    if isinstance(error, TimeoutError) or any(value in message for value in (
+        "connection timeout", "timeout expired", "timed out"
+    )):
+        return "connection_timeout"
+    if any(value in message for value in (
+        "could not translate host name", "name or service not known", "getaddrinfo failed",
+        "temporary failure in name resolution", "nodename nor servname"
+    )):
+        return "dns_resolution_error"
+    if any(value in message for value in ("ssl", "tls", "certificate verify failed")):
+        return "tls_error"
+    if sqlstate == "42501":
+        return "permission_denied"
+    if any(value in message for value in (
+        "connection refused", "no route to host", "network is unreachable", "could not connect"
+    )):
+        return "host_unreachable"
+    if sqlstate and sqlstate.startswith("28"):
+        return "authentication_failed"
+    return "database_error"
+
+
 def migration_error_details(
     error: Exception, database_url: str | URL | None = None,
     env: Mapping[str, str] | None = None,
@@ -114,9 +161,11 @@ def migration_error_details(
         message = "SQLAlchemy statement failed; driver error unavailable."
     else:
         message = primary if isinstance(primary, str) and primary else str(driver_error)
+    safe_message = redact_database_message(message, database_url, env)
     return {
         "exception_type": _exception_type(error),
         "driver_exception_type": _exception_type(driver_error),
         "sqlstate": sqlstate,
-        "message": redact_database_message(message, database_url, env),
+        "error_category": classify_database_error(driver_error, sqlstate, safe_message),
+        "message": safe_message,
     }

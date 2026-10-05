@@ -9,14 +9,15 @@ from .config import DATA_DIR, PERSISTENCE
 
 DATABASE_PATH = DATA_DIR / "wardrobe.db"
 DATABASE_URL = PERSISTENCE.database_url
+DATABASE_CONNECT_TIMEOUT_SECONDS = 10
 
 
 def create_database_engine(url: str):
     if url.startswith("sqlite:"):
         return create_engine(url, connect_args={"check_same_thread": False}, hide_parameters=True)
-    return create_engine(url, connect_args={"connect_timeout": 10},
+    return create_engine(url, connect_args={"connect_timeout": DATABASE_CONNECT_TIMEOUT_SECONDS},
                          pool_pre_ping=True, pool_size=5, max_overflow=0,
-                         hide_parameters=True)
+                         pool_timeout=DATABASE_CONNECT_TIMEOUT_SECONDS, hide_parameters=True)
 
 
 engine = create_database_engine(DATABASE_URL)
@@ -30,6 +31,14 @@ SessionLocal = sessionmaker(
 
 class Base(DeclarativeBase):
     pass
+
+
+def preflight_database_connection(target_engine=None):
+    """Read-only connectivity check, before any schema changes."""
+    target_engine = target_engine or engine
+    with target_engine.connect() as connection:
+        if connection.execute(text("SELECT 1")).scalar_one() != 1:
+            raise RuntimeError("Database preflight returned an unexpected result")
 
 
 def _migrate_metadata(connection):
@@ -82,6 +91,9 @@ def apply_schema_migrations(target_engine=None):
             Path(path).parent.mkdir(parents=True, exist_ok=True)
     with target_engine.begin() as connection:
         if target_engine.dialect.name == "postgresql":
+            # Scope to this transaction: don't change application/global settings.
+            connection.execute(text("SET LOCAL lock_timeout = '5s'"))
+            connection.execute(text("SET LOCAL statement_timeout = '10s'"))
             # Serialize deploy migrations, even if two instances start together.
             connection.execute(text("SELECT pg_advisory_xact_lock(82471021)"))
         Base.metadata.create_all(bind=connection)

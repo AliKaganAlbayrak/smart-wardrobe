@@ -95,6 +95,17 @@ Config/driver failures are caught before connection attempts as well. Use the
 latest deploy's migration log to distinguish the actual connection or permission
 failure; a healthy old service does not prove the new migration succeeded.
 
+PostgreSQL startup runs a read-only `SELECT 1` preflight in a fresh process with a
+10-second wall-clock deadline (including DNS/TLS/query waits). Failure exits 1
+before DDL or Uvicorn. The driver and pool also use 10-second connection/checkout
+timeouts. A successful preflight is followed by a separately bounded 30-second
+migration worker; its transaction uses `lock_timeout=5s` and `statement_timeout=10s`
+before the advisory lock. A blocked worker is terminated/reaped; no credentials
+are passed through CLI arguments and uncontrolled child output is never logged.
+Error categories distinguish authentication, missing user/database, DNS, TLS,
+connection/lock/statement/migration timeouts and unreachable hosts. These small
+bootstrap limits are deliberate; larger future migrations need a separate job.
+
 **Existing data is not automatically transferred.** The six local records/photos
 remain untouched and outside Git. A fresh PostgreSQL project starts empty. Before
 entering new production data, deploy this configuration and verify persistence.

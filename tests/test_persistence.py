@@ -73,6 +73,7 @@ class PersistenceConfigurationTests(unittest.TestCase):
             create_database_engine("postgresql+psycopg://user:pass@host/db")
             self.assertEqual(factory.call_args.kwargs["connect_args"], {"connect_timeout": 10})
             self.assertEqual(factory.call_args.kwargs["max_overflow"], 0)
+            self.assertEqual(factory.call_args.kwargs["pool_timeout"], 10)
             create_database_engine("sqlite://")
             self.assertEqual(factory.call_args.kwargs["connect_args"], {"check_same_thread": False})
 
@@ -366,7 +367,8 @@ class SchemaMigrationTests(unittest.TestCase):
             apply_schema_migrations(engine)
         create.assert_called_once_with(bind=connection)
         statements = [str(call.args[0]) for call in connection.execute.call_args_list]
-        self.assertIn("pg_advisory_xact_lock", statements[0])
+        self.assertEqual(statements[:2], ["SET LOCAL lock_timeout = '5s'", "SET LOCAL statement_timeout = '10s'"])
+        self.assertIn("pg_advisory_xact_lock", statements[2])
         self.assertEqual(statements[-1], "ALTER TABLE clothes ENABLE ROW LEVEL SECURITY")
         self.assertFalse(any("PRAGMA" in sql or "DROP" in sql for sql in statements))
 

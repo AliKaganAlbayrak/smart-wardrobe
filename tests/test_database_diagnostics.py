@@ -269,12 +269,13 @@ class MigrationDiagnosticCLITests(unittest.TestCase):
             result = subprocess.run([sys.executable, "-m", "app.migrate"], env=process_env,
                                     cwd=directory, capture_output=True, text=True, timeout=20)
             self.assertEqual(result.returncode, 1)
-            self.assertIn('"phase": "migration"', result.stderr)
+            self.assertIn('"phase": "preflight"', result.stderr)
             details = json.loads(result.stderr.split("Schema migration failed: ", 1)[1])
-            self.assertEqual(details["exception_type"], "sqlalchemy.exc.OperationalError")
+            self.assertIn(details["exception_type"], {"sqlalchemy.exc.OperationalError", "builtins.TimeoutError"})
             self.assertIn(details["driver_exception_type"],
-                          {"psycopg.OperationalError", "psycopg.errors.ConnectionTimeout"})
+                          {"psycopg.OperationalError", "psycopg.errors.ConnectionTimeout", "builtins.TimeoutError"})
             self.assertTrue(details["message"])
+            self.assertIn(details["error_category"], {"host_unreachable", "connection_timeout"})
             self.assertNotIn("Traceback", result.stderr)
             DatabaseDiagnosticSecurityTests().assert_no_secrets(result.stdout + result.stderr, env)
             self.assertEqual(list(Path(directory).iterdir()), [])
