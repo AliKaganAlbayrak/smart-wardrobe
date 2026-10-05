@@ -122,8 +122,10 @@ select:focus, input:focus { border-color: #8d8e78; box-shadow: 0 0 0 3px rgba(11
 .submit-button { width: 100%; }
 
 .recommendation-header { align-items: flex-end; }
-.recommendation-controls { display: flex; gap: 10px; }
+.recommendation-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
 .recommendation-controls label { min-width: 130px; }
+.recommendation-create-button { min-width: 172px; white-space: nowrap; }
+.recommendation-loading { margin: 0; color: var(--muted); font-size: 14px; }
 .recommendation-list { display: grid; gap: 24px; }
 .recommendation-card { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
 .recommendation-topline { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10px; font-weight: 600; letter-spacing: .15em; }
@@ -180,6 +182,7 @@ select:focus, input:focus { border-color: #8d8e78; box-shadow: 0 0 0 3px rgba(11
   .form-grid .full-width { grid-column: auto; }
   .recommendation-controls { width: 100%; }
   .recommendation-controls label { flex: 1; min-width: 0; }
+  .recommendation-controls .recommendation-create-button { width: 100%; }
   .outfit-pieces { gap: 7px; }
   .outfit-piece > div { height: 145px; }
   .explanation-grid { grid-template-columns: 1fr; }

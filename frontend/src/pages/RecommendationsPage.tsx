@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ClothingImage } from "../components/ClothingImage";
 import { ScoreBar } from "../components/ScoreBar";
 import { getRecommendations } from "../services/api";
@@ -13,12 +13,13 @@ export function RecommendationsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const initialRequestStarted = useRef(false);
 
-  const loadRecommendations = async () => {
+  const loadRecommendations = useCallback(async (requestedSeason: string, requestedLimit: number) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await getRecommendations(season || undefined, limit);
+      const response = await getRecommendations(requestedSeason || undefined, requestedLimit);
       setRecommendations(response.recommendations);
       setMessage(response.message);
     } catch (requestError) {
@@ -26,11 +27,14 @@ export function RecommendationsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    void loadRecommendations();
-  }, [season, limit]);
+    // Avoid duplicate initial requests during StrictMode's development effect replay.
+    if (initialRequestStarted.current) return;
+    initialRequestStarted.current = true;
+    void loadRecommendations("", 3);
+  }, [loadRecommendations]);
 
   return (
     <section className="page-section">
@@ -43,13 +47,24 @@ export function RecommendationsPage() {
         <div className="recommendation-controls">
           <label><span>Mevsim</span><select value={season} onChange={(event) => setSeason(event.target.value)}>{seasonOptions.map((value) => <option key={value} value={value}>{value || "Tüm mevsimler"}</option>)}</select></label>
           <label><span>Sonuç</span><select value={limit} onChange={(event) => setLimit(Number(event.target.value))}>{[3, 5, 8].map((value) => <option key={value}>{value}</option>)}</select></label>
+          <button
+            type="button"
+            className="primary-button recommendation-create-button"
+            disabled={loading}
+            onClick={() => void loadRecommendations(season, limit)}
+          >
+            {loading ? "Kombinler hazırlanıyor..." : "Kombin Oluştur"}
+          </button>
         </div>
       </header>
 
-      {error && <div className="alert error"><span>!</span>{error}<button onClick={() => void loadRecommendations()}>Tekrar dene</button></div>}
+      {error && <div className="alert error"><span>!</span>{error}<button onClick={() => void loadRecommendations(season, limit)}>Tekrar dene</button></div>}
 
       {loading ? (
-        <div className="recommendation-list">{[1, 2].map((value) => <div className="recommendation-skeleton" key={value} />)}</div>
+        <div className="recommendation-list" aria-busy="true">
+          <p className="recommendation-loading" role="status">Kombinler hazırlanıyor...</p>
+          {[1, 2].map((value) => <div className="recommendation-skeleton" key={value} />)}
+        </div>
       ) : error ? null : recommendations.length === 0 ? (
         <div className="empty-state"><span>✦</span><h2>Bu kombin için yeterli kıyafet bulunamadı.</h2><p>{message || "En az bir üst, bir alt ve bir ayakkabı eklemelisin."}</p></div>
       ) : (
