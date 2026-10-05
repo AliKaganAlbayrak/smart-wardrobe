@@ -21,6 +21,7 @@ CATEGORY_ALIASES = {
 TOP_CATEGORIES = {"tshirt", "shirt", "polo", "sweater", "hoodie"}
 BOTTOM_CATEGORIES = {"pants", "jeans", "shorts"}
 SHOES_CATEGORY = "shoes"
+JACKET_CATEGORY = "jacket"
 SUPPORTED_CATEGORIES = set(CATEGORY_ALIASES)
 
 SEASON_ALIASES = {
@@ -61,6 +62,12 @@ COLOR_WEIGHT = 0.35
 SEASON_WEIGHT = 0.25
 STYLE_WEIGHT = 0.25
 FORMALITY_WEIGHT = 0.15
+
+SEASON_MISMATCH_SCORE = 0.10
+ALL_SEASON_SCORE = 0.85
+MIN_SEASON_QUALITY = 0.80
+JACKET_SEASONS = {"autumn", "winter"}
+MAX_JACKET_BONUS = 0.05
 
 STYLE_ALIASES = {
     "casual": {"casual"},
@@ -226,7 +233,7 @@ def season_compatibility_score(
     if not requested_season:
         return 1.0
     if requested_value == "unknown":
-        return 0.35
+        return SEASON_MISMATCH_SCORE
 
     values = list(clothing_seasons or [])
     if not values:
@@ -237,8 +244,15 @@ def season_compatibility_score(
     if requested_value in normalized_values:
         return 1.0
     if "all-season" in normalized_values:
-        return 0.85
-    return 0.35
+        return ALL_SEASON_SCORE
+    return SEASON_MISMATCH_SCORE
+
+
+def season_quality_factor(season_score: float, season: str | None) -> float:
+    """Below the quality floor, season fit also limits the overall score."""
+    if season is not None and season_score < MIN_SEASON_QUALITY:
+        return max(0.0, min(1.0, season_score))
+    return 1.0
 
 
 def _color_score(top: Any, bottom: Any, shoes: Any) -> float:
@@ -283,6 +297,56 @@ def _formality_score(top: Any, bottom: Any, shoes: Any) -> float:
     return sum(pair_scores) / len(pair_scores)
 
 
+def _jacket_compatibility_score(jacket: Any, items: tuple[Any, ...], season: str) -> float:
+    """Evaluate an outer layer without changing the core outfit's pair scores."""
+    color_score = sum(
+        color_compatibility_score(_value(jacket, "color"), _value(item, "color"))
+        for item in items
+    ) / len(items)
+    style_score = sum(
+        style_compatibility_score(_value(jacket, "style"), _value(item, "style"))
+        for item in items
+    ) / len(items)
+    formality_score = sum(
+        formality_compatibility_score(_value(jacket, "formality"), _value(item, "formality"))
+        for item in items
+    ) / len(items)
+    season_score = season_compatibility_score(
+        _value(jacket, "season"), season, _season_values(jacket)
+    )
+    return (
+        color_score * COLOR_WEIGHT
+        + season_score * SEASON_WEIGHT
+        + style_score * STYLE_WEIGHT
+        + formality_score * FORMALITY_WEIGHT
+    )
+
+
+def _select_jacket(
+    jackets: Iterable[Any], items: tuple[Any, ...], season: str | None
+) -> tuple[Any | None, float]:
+    if season not in JACKET_SEASONS:
+        return None, 0.0
+    candidates = [
+        jacket for jacket in jackets
+        if season_compatibility_score(
+            _value(jacket, "season"), season, _season_values(jacket)
+        ) >= ALL_SEASON_SCORE
+    ]
+    if not candidates:
+        return None, 0.0
+    # One best layer per core outfit avoids duplicate layered/unlayered suggestions.
+    ranked = sorted(
+        candidates,
+        key=lambda jacket: (
+            -_jacket_compatibility_score(jacket, items, season),
+            _value(jacket, "id") or 0,
+        ),
+    )
+    jacket = ranked[0]
+    return jacket, MAX_JACKET_BONUS * _jacket_compatibility_score(jacket, items, season)
+
+
 def _metadata_missing(items: Iterable[Any], field: str) -> bool:
     return any(_value(item, field) in (None, "") for item in items)
 
@@ -313,9 +377,23 @@ def _build_explanation(
             reasons.append(f"Mevsim uyumu yüksek ({season_score:.2f}).")
         elif season_score < 0.5:
             penalties.append(f"Mevsim uyumu düşük ({season_score:.2f}).")
-        if _metadata_missing(items, "season") and any(
-            not _season_values(item) for item in items
-        ):
+        mismatched_names = [
+            str(_value(item, "name") or _value(item, "category") or "Kıyafet")
+            for item in items
+            if season_compatibility_score(
+                _value(item, "season"), season, _season_values(item)
+            ) < ALL_SEASON_SCORE
+        ]
+        if mismatched_names:
+            penalties.append(
+                "Seçilen mevsime uygun olmayan parçalar: " + ", ".join(mismatched_names) + "."
+            )
+        if season_score < MIN_SEASON_QUALITY:
+            penalties.append(
+                f"Mevsim uyumu yetersiz; toplam puana mevsim kalite cezası uygulandı "
+                f"(×{season_quality_factor(season_score, season):.2f})."
+            )
+        if any(not _season_values(item) for item in items):
             penalties.append("Eksik mevsim metadata'sı için penalty uygulandı.")
 
     if _metadata_missing(items, "style"):
@@ -368,6 +446,7 @@ def build_recommendations(
     tops = _category_items(clothes, TOP_CATEGORIES)
     bottoms = _category_items(clothes, BOTTOM_CATEGORIES)
     shoes = _category_items(clothes, {SHOES_CATEGORY})
+    jackets = _category_items(clothes, {JACKET_CATEGORY})
 
     recommendations = []
     for top, bottom, shoe in product(tops, bottoms, shoes):
@@ -375,12 +454,16 @@ def build_recommendations(
         season_score = _season_score(top, bottom, shoe, season)
         style_score = _style_score(top, bottom, shoe)
         formality_score = _formality_score(top, bottom, shoe)
-        final_score = (
+        weighted_score = (
             (color_score * COLOR_WEIGHT)
             + (season_score * SEASON_WEIGHT)
             + (style_score * STYLE_WEIGHT)
             + (formality_score * FORMALITY_WEIGHT)
         )
+        jacket, jacket_bonus = _select_jacket(jackets, (top, bottom, shoe), season)
+        quality_factor = season_quality_factor(season_score, season)
+        # A suitable layer cannot hide an unsuitable top, bottom or pair of shoes.
+        final_score = (weighted_score + jacket_bonus) * quality_factor
         reasons, penalties = _build_explanation(
             top,
             bottom,
@@ -391,10 +474,17 @@ def build_recommendations(
             style_score,
             formality_score,
         )
+        if jacket is not None:
+            reasons.append("Dış katman seçilen mevsime uygun.")
+            if normalize_color(_value(jacket, "color")) == "unknown":
+                penalties.append("Dış katmanın renk bilgisi tanınmadı; tarafsız uyum puanı kullanıldı.")
+            if _metadata_missing((jacket,), "style") or _metadata_missing((jacket,), "formality"):
+                penalties.append("Dış katmanın bazı stil veya resmiyet bilgileri eksik; tarafsız uyum puanı kullanıldı.")
         rounded_score = round(max(0.0, min(1.0, final_score)), 4)
         recommendations.append({
             "score": rounded_score,
             "top": top,
+            "jacket": jacket,
             "bottom": bottom,
             "shoes": shoe,
             "details": {
@@ -402,6 +492,8 @@ def build_recommendations(
                 "season_score": round(season_score, 4),
                 "style_score": round(style_score, 4),
                 "formality_score": round(formality_score, 4),
+                "season_quality_factor": round(quality_factor, 4),
+                "jacket_bonus": round(jacket_bonus, 4),
                 "total_score": rounded_score,
                 "reasons": reasons,
                 "penalties": penalties,

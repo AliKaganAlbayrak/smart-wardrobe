@@ -4,6 +4,7 @@ import { ScoreBar } from "../components/ScoreBar";
 import { EmptyState, ErrorNotice } from "../components/Feedback";
 import { displayLabel, friendlyExplanation } from "../services/display";
 import { getRecommendations } from "../services/api";
+import { getOutfitPieces } from "../services/recommendations";
 import type { Recommendation } from "../types";
 
 const seasonOptions = ["", "spring", "summer", "autumn", "winter"];
@@ -71,15 +72,22 @@ export function RecommendationsPage() {
         <EmptyState title="Bu kombin için yeterli kıyafet bulunamadı." description={message ? "Kombin oluşturmak için gardırobuna bir üst, bir alt ve bir ayakkabı ekle." : "En az bir üst, bir alt ve bir ayakkabı eklemelisin."} />
       ) : (
         <div className="recommendation-list">
-          {recommendations.map((recommendation, index) => (
-            <article className="recommendation-card" key={`${recommendation.top.id}-${recommendation.bottom.id}-${recommendation.shoes.id}`}>
-              <div className="recommendation-topline"><div><span>ÖNERİ {String(index + 1).padStart(2, "0")}</span><p>Üç parça, tek bir bütün.</p></div><div className="total-score"><strong>{Math.round(recommendation.details.total_score * 100)}<small>%</small></strong><span>GENEL UYUM</span></div></div>
+          {recommendations.map((recommendation, index) => {
+            const pieces = getOutfitPieces(recommendation);
+            const layered = Boolean(recommendation.jacket);
+            return (
+            <article className="recommendation-card" key={`${recommendation.top.id}-${recommendation.jacket?.id ?? "none"}-${recommendation.bottom.id}-${recommendation.shoes.id}`}>
+              <div className="recommendation-topline"><div><span>ÖNERİ {String(index + 1).padStart(2, "0")}</span><p>{layered ? "Dört parça, katmanlı bir bütün." : "Üç parça, tek bir bütün."}</p></div><div className="total-score"><strong>{Math.round(recommendation.details.total_score * 100)}<small>%</small></strong><span>GENEL UYUM</span></div></div>
               <div className="outfit-layout">
-                <div className="outfit-pieces">
-                  {(["top", "bottom", "shoes"] as const).map((part) => {
-                    const item = recommendation[part];
-                    return <div className="outfit-piece" key={part}><div><ClothingImage path={item.image_path} alt={item.name} compact /></div><span>{{ top: "Üst", bottom: "Alt", shoes: "Ayakkabı" }[part]}</span><strong>{item.name}</strong><small>{displayLabel(item.color)}{item.style ? ` · ${displayLabel(item.style)}` : ""}</small></div>;
-                  })}
+                <div className={`outfit-pieces${layered ? " outfit-pieces-layered" : ""}`}>
+                  {pieces.map(({ part, label, item }) => (
+                    <div className="outfit-piece" key={part}>
+                      <div><ClothingImage path={item.image_path} alt={item.name} compact /></div>
+                      <span>{label}</span>
+                      <strong>{item.name}</strong>
+                      <small>{displayLabel(item.category)} · {displayLabel(item.color)}{item.style ? ` · ${displayLabel(item.style)}` : ""}</small>
+                    </div>
+                  ))}
                 </div>
                 <div className="score-panel">
                   <ScoreBar label="Renk" value={recommendation.details.color_score} />
@@ -93,7 +101,8 @@ export function RecommendationsPage() {
                 {recommendation.details.penalties.length > 0 && <div><h3><span className="warning-dot" />Küçük notlar</h3><ul>{recommendation.details.penalties.map((penalty) => <li key={penalty}>{friendlyExplanation(penalty)}</li>)}</ul></div>}
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>

@@ -34,11 +34,14 @@ export interface RecommendationScores {
   total_score: number;
   reasons: string[];
   penalties: string[];
+  season_quality_factor?: number;
+  jacket_bonus?: number;
 }
 
 export interface Recommendation {
   score: number;
   top: Clothing;
+  jacket?: Clothing | null;
   bottom: Clothing;
   shoes: Clothing;
   details: RecommendationScores;

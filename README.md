@@ -59,19 +59,35 @@ unittest, FastAPI TestClient and Node's built-in test runner.
 ## 6. Recommendation Engine
 
 V2.2 forms one top (`tshirt/shirt/polo/sweater/hoodie`), one bottom
-(`pants/jeans/shorts`) and shoes; jackets are not layered. Pairwise color/style/
+(`pants/jeans/shorts`) and shoes; autumn/winter may include one suitable
+`jacket` (also recognizing `coat`). Pairwise color/style/
 formality compatibility is averaged. Multiple seasons, `all-season` and legacy
-`season` fallback are supported. Missing metadata receives a neutral fallback.
+`season` fallback are supported. Missing color/style/formality metadata receives
+a neutral fallback; missing season data is penalized.
 
 ```text
-total = color × 0.35 + season × 0.25 + style × 0.25 + formality × 0.15
+weighted = color × 0.35 + season × 0.25 + style × 0.25 + formality × 0.15
+quality_factor = season_score if a season is requested and season_score < 0.80 else 1
+total = clamp((weighted + jacket_bonus) × quality_factor, 0, 1)
 GET /recommendations?season=spring&limit=3
 ```
 
 Scores are bounded to 0–1 and exposed with reasons/penalties. Stable ID tie-breaking
 makes repeated requests deterministic. Limit is 1–20 (default 3). Seasons:
 spring, summer, autumn/fall, winter, all-season (plus all/any aliases).
-Out-of-season pieces are penalized, not excluded. See the
+Exact season matches score 1; `all-season` scores 0.85; mismatches score 0.10.
+The core outfit's color/style/formality calculations and weights are unchanged.
+An eligible jacket adds up to 0.05, scaled by its compatibility with the core
+pieces; the season quality penalty also applies to that bonus. Jackets are never
+added for spring, summer or an unspecified season. One best jacket per core outfit
+avoids near-duplicate results. The additive nullable `jacket` response uses the same
+clothing serializer, including a `seasons` array. Reasons and penalties identify
+the outer layer and unsuitable pieces; details expose `jacket_bonus` and
+`season_quality_factor` alongside existing scores.
+The frontend renders top → optional jacket → bottom → shoes, with four pieces
+on desktop/tablet and a two-by-two layered layout on mobile. Responses without a
+jacket retain the original three-piece layout and explanation sections.
+Out-of-season pieces are penalized, not excluded. See the historical
 [real six-item quality audit](docs/recommendation-quality.md), including the lack
 of a summer bottom and cross-request repetition. Fit/material do not affect scores.
 

@@ -68,11 +68,14 @@ class RecommendationDetails(BaseModel):
     total_score: float
     reasons: list[str]
     penalties: list[str]
+    season_quality_factor: float = 1.0
+    jacket_bonus: float = 0.0
 
 
 class RecommendationResponse(BaseModel):
     score: float
     top: ClothingResponse
+    jacket: ClothingResponse | None = None
     bottom: ClothingResponse
     shoes: ClothingResponse
     details: RecommendationDetails

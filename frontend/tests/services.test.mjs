@@ -14,6 +14,7 @@ async function loadModule(path, apiBase = "http://127.0.0.1:8001") {
 }
 const display = await loadModule("../src/services/display.ts");
 const api = await loadModule("../src/services/api.ts");
+const { getOutfitPieces } = await loadModule("../src/services/recommendations.ts");
 
 test("display labels handle whitespace and missing legacy metadata", () => {
   assert.equal(display.displayLabel(" polo"), "Polo");
@@ -80,4 +81,60 @@ test("multipart creation preserves seasons and photo; failed requests can retry"
     style: "smart_casual", fit: "regular", material: "cotton", formality: 5, image };
   await assert.rejects(api.createClothing(input), /Temporary failure/);
   assert.equal((await api.createClothing(input)).clothing.id, 7);
+});
+
+const fixtureClothing = (id, category) => ({
+  id, name: `Test ${category}`, category, color: "black", season: "winter",
+  seasons: ["autumn", "winter"], style: "smart_casual", fit: "regular",
+  material: "cotton", formality: 5, image_path: `uploads/${id}.jpg`,
+});
+const fixtureRecommendation = () => ({
+  score: 0.9,
+  top: fixtureClothing(1, "shirt"),
+  bottom: fixtureClothing(2, "pants"),
+  shoes: fixtureClothing(3, "shoes"),
+  details: { color_score: 0.9, season_score: 1, style_score: 0.9,
+    formality_score: 0.9, total_score: 0.9, reasons: [], penalties: [] },
+});
+
+test("winter and autumn API jackets retain metadata in top-jacket-bottom-shoes order", async (t) => {
+  for (const season of ["winter", "autumn"]) {
+    const result = { ...fixtureRecommendation(), jacket: fixtureClothing(4, "jacket") };
+    result.details.reasons = ["Dış katman seçilen mevsime uygun."];
+    result.details.penalties = ["Seçilen mevsime uygun olmayan parçalar: Test shirt."];
+    t.mock.method(globalThis, "fetch", async (url) => {
+      assert.equal(url, `http://127.0.0.1:8001/recommendations?limit=3&season=${season}`);
+      return new Response(JSON.stringify({ recommendations: [result], message: null }));
+    });
+    const response = await api.getRecommendations(season, 3);
+    const pieces = getOutfitPieces(response.recommendations[0]);
+    assert.deepEqual(pieces.map(({ part }) => part), ["top", "jacket", "bottom", "shoes"]);
+    assert.deepEqual(pieces[1].item, result.jacket);
+    assert.equal(pieces[1].label, "Dış katman");
+    assert.equal(api.imageUrl(pieces[1].item.image_path), "http://127.0.0.1:8001/uploads/4.jpg");
+    assert.equal(display.displayLabel(pieces[1].item.category), "Ceket");
+    assert.equal(display.displayLabel(pieces[1].item.color), "Siyah");
+    assert.equal(display.displayLabel(pieces[1].item.style), "Şık günlük");
+    assert.deepEqual(response.recommendations[0].details, result.details);
+  }
+});
+
+test("summer with null jacket keeps the three-piece layout", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({
+    recommendations: [{ ...fixtureRecommendation(), jacket: null }], message: null,
+  })));
+  const response = await api.getRecommendations("summer", 3);
+  assert.deepEqual(getOutfitPieces(response.recommendations[0]).map(({ part }) => part),
+    ["top", "bottom", "shoes"]);
+});
+
+test("legacy omitted jacket and nullable legacy metadata remain safe", () => {
+  const legacy = fixtureRecommendation();
+  assert.equal(getOutfitPieces(legacy).length, 3);
+  legacy.jacket = { ...fixtureClothing(4, "coat"), style: null, material: null,
+    formality: null, image_path: null };
+  const pieces = getOutfitPieces(legacy);
+  assert.equal(pieces.length, 4);
+  assert.equal(display.displayLabel(pieces[1].item.category), "Palto");
+  assert.equal(api.imageUrl(pieces[1].item.image_path), null);
 });

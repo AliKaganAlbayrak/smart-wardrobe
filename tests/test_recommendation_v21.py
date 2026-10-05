@@ -47,7 +47,7 @@ class RecommendationEngineV21Tests(unittest.TestCase):
 
     def test_legacy_season_fallback(self):
         self.assertEqual(season_compatibility_score("summer", "summer"), 1.0)
-        self.assertEqual(season_compatibility_score("winter", "summer"), 0.35)
+        self.assertEqual(season_compatibility_score("winter", "summer"), 0.10)
 
     def test_deterministic_results(self):
         clothes = [self.top, self.bottom, self.shoes]

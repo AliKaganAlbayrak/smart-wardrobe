@@ -43,6 +43,10 @@ def get_recommendations(
         {
             **recommendation,
             "top": serialize_clothing(recommendation["top"]),
+            "jacket": (
+                serialize_clothing(recommendation["jacket"])
+                if recommendation.get("jacket") is not None else None
+            ),
             "bottom": serialize_clothing(recommendation["bottom"]),
             "shoes": serialize_clothing(recommendation["shoes"]),
         }

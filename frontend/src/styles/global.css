@@ -142,11 +142,12 @@ input:focus, select:focus { border-color: var(--olive); box-shadow: 0 0 0 3px #7
 .recommendation-topline .total-score > span { margin-top: 4px; color: var(--muted); font-size: 8px; letter-spacing: .12em; }
 .outfit-layout { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 28px; padding: 24px 28px 28px; }
 .outfit-pieces { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.outfit-pieces-layered { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .outfit-piece { min-width: 0; }
 .outfit-piece > div { overflow: hidden; aspect-ratio: 3 / 4; border-radius: 6px; background: #e9e5dc; }
 .outfit-piece > span { display: block; margin-top: 14px; color: #969989; font-size: 9px; letter-spacing: .09em; text-transform: uppercase; }
 .outfit-piece > strong { display: block; margin-top: 5px; font: 17px/1.3 Georgia, serif; overflow-wrap: anywhere; }
-.outfit-piece > small { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.outfit-piece > small { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
 .score-panel { display: flex; flex-direction: column; justify-content: center; gap: 22px; }
 .score-label { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 9px; color: var(--muted); font-size: 12px; }
 .score-label strong { color: var(--ink); font-weight: 500; }
@@ -208,6 +209,7 @@ input:focus, select:focus { border-color: var(--olive); box-shadow: 0 0 0 3px #7
   .recommendation-controls label { flex: 1; min-width: 0; }
   .recommendation-create-button { width: 100%; }
   .recommendation-topline, .outfit-layout, .explanation-grid { padding-left: 20px; padding-right: 20px; }
+  .outfit-pieces-layered { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 24px; }
   .explanation-grid { grid-template-columns: 1fr; gap: 24px; }
 }
 @media (max-width: 480px) {
