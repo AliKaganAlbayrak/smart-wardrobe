@@ -1,0 +1,17 @@
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "24"
+
+# Set VITE_API_BASE_URL to the real backend URL in the Netlify dashboard.
+# A missing URL must not silently publish a demo pointing at the visitor's localhost.
+[context.production]
+  command = "node -e \"const u=new URL(process.env.VITE_API_BASE_URL); if(u.protocol!=='https:'||['localhost','127.0.0.1'].includes(u.hostname)) throw Error('Set a public HTTPS VITE_API_BASE_URL')\" && npm run build"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

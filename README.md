@@ -1,44 +1,111 @@
 # Smart Wardrobe
 
-Kıyafetlerini fotoğrafları ve detaylarıyla saklayan, mevcut gardırobundan
-açıklanabilir kombinler üreten bir yerel web uygulaması.
+## 1. Project Overview
 
-## Özellikler
+A single-user wardrobe demo with photo-based clothing management and deterministic,
+explainable outfit recommendations. A modular FastAPI API powers a responsive React
+dashboard. No ML, external weather service or authentication is required.
 
-- Fotoğraflı gardırop; kategori, renk, mevsim ve stil filtreleri.
-- Kıyafet ekleme, önceden doldurulmuş panelde düzenleme ve onaylı silme.
-- Çoklu mevsim, legacy `season` uyumluluğu ve 1–10 resmiyet doğrulaması.
-- Renk, mevsim, stil ve resmiyet puanlarıyla deterministic kombin önerileri.
-- Explicit **Kombin Oluştur** akışı; loading, hata, retry ve başarı bildirimleri.
-- Desktop, tablet ve mobil ekranlara uyarlanan React arayüzü.
+## 2. Features
 
-## Mimari ve stack
+- Clothing CRUD and partial editing via PATCH; metadata and multiple seasons.
+- Multipart image uploads with UUID filenames and static image serving.
+- Category, color, season and frontend style filters.
+- Ranked outfits with color, season, style and formality scores and explanations.
+- Responsive cards, edit/confirmation dialogs, image preview, loading/error/retry states.
+
+## 3. Screenshots
+
+Actual local application, using the six existing wardrobe items.
+
+### Wardrobe
+
+![Wardrobe](docs/screenshots/wardrobe.jpg)
+
+### Add clothing
+
+![Add clothing](docs/screenshots/add-clothing.jpg)
+
+### Outfit recommendations
+
+![Outfit recommendations](docs/screenshots/recommendations.jpg)
+
+## 4. Architecture
 
 ```text
 app/
-  main.py                  # FastAPI, CORS, /uploads static serving
-  database.py, models.py   # SQLAlchemy 2 + SQLite
-  schemas.py              # Pydantic validation
-  routers/                # clothes ve recommendations HTTP endpointleri
-  services/               # clothing, image, recommendation iş mantığı
+  main.py, config.py, database.py, models.py, schemas.py
+  routers/     clothes.py, recommendations.py
+  services/    clothing_service.py, image_service.py, recommendation.py
 frontend/src/
-  components/             # Kartlar, ortak form alanları, modal, feedback
-  pages/                  # Gardırop, kıyafet ekleme, kombin önerileri
-  services/               # Merkezi API istemcisi ve görüntüleme etiketleri
-  types/, styles/         # TypeScript tipleri ve plain CSS
-tests/                    # Backend unit ve smoke testleri
+  components/  reusable forms, cards, dialogs and feedback
+  pages/       wardrobe, add clothing, recommendations
+  services/    API client and display labels
+  types/, styles/
+tests/         backend unit and live API smoke tests
+docs/          screenshots, quality audit and deployment runbook
 ```
 
-Backend: Python 3.10+, FastAPI, Uvicorn, SQLAlchemy, Pydantic, SQLite,
-python-multipart. Frontend: React, TypeScript, Vite; ağır UI framework yok.
+Routers handle HTTP; services handle storage/business logic. The recommendation
+service works on supplied objects without database access. SQLite and uploads share
+a configurable data directory; local defaults remain at the project root.
 
-SQLite ve upload yolları proje köküne göre çözülür; çalışma dizinine bağımlı
-değildir. `wardrobe.db`, `uploads/`, virtual environment ve build/cache
-dosyaları Git dışında tutulur.
+## 5. Tech Stack
 
-## Yerelde çalıştırma
+Backend: Python, FastAPI, Pydantic, SQLAlchemy 2, SQLite, Uvicorn,
+python-multipart. Frontend: React, TypeScript, Vite and plain CSS. Tests: Python
+unittest, FastAPI TestClient and Node's built-in test runner.
 
-Proje kökünde sanal ortam yoksa oluşturun ve bağımlılıkları kurun:
+## 6. Recommendation Engine
+
+V2.2 forms one top (`tshirt/shirt/polo/sweater/hoodie`), one bottom
+(`pants/jeans/shorts`) and shoes; jackets are not layered. Pairwise color/style/
+formality compatibility is averaged. Multiple seasons, `all-season` and legacy
+`season` fallback are supported. Missing metadata receives a neutral fallback.
+
+```text
+total = color × 0.35 + season × 0.25 + style × 0.25 + formality × 0.15
+GET /recommendations?season=spring&limit=3
+```
+
+Scores are bounded to 0–1 and exposed with reasons/penalties. Stable ID tie-breaking
+makes repeated requests deterministic. Limit is 1–20 (default 3). Seasons:
+spring, summer, autumn/fall, winter, all-season (plus all/any aliases).
+Out-of-season pieces are penalized, not excluded. See the
+[real six-item quality audit](docs/recommendation-quality.md), including the lack
+of a summer bottom and cross-request repetition. Fit/material do not affect scores.
+
+## 7. API Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/` | Root/health message |
+| GET | `/clothes` | List; optional category/color/season queries |
+| POST | `/clothes` | Multipart clothing + optional image |
+| GET | `/clothes/{id}` | Retrieve one item |
+| PATCH | `/clothes/{id}` | JSON partial metadata update |
+| DELETE | `/clothes/{id}` | Delete record and associated image |
+| GET | `/recommendations` | Ranked outfits; season/limit queries |
+| GET | `/uploads/{filename}` | Static uploaded image |
+
+POST accepts name, category, color, season/seasons, style, fit, material,
+formality and image. Repeat the multipart `seasons` field for multiple values.
+Responses include nullable legacy metadata and a `seasons` array. List/create
+envelopes remain `{clothes: [...]}` and `{message: ..., clothing: {...}}`.
+PATCH returns the clothing object directly.
+
+```json
+{"style":"smart_casual","formality":6,"seasons":["spring","summer"]}
+```
+
+PATCH preserves omitted fields and `image_path`. Updating seasons synchronizes
+legacy season to the first value. Formality outside 1–10 returns 422; missing IDs
+return 404. Swagger: <http://127.0.0.1:8001/docs>.
+
+## 8. Local Development
+
+Python 3.13 and Node 24 are the tested runtimes. Reuse an existing virtual environment
+if available; activation is not required on Windows. For a new checkout:
 
 ```powershell
 python -m venv .venv
@@ -46,15 +113,9 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8001
 ```
 
-Bu projede ortam üst klasördeyse aynı komutlarda
-`..\.venv\Scripts\python.exe` kullanın. Aktivasyon veya PowerShell
-Execution Policy değişikliği gerekmez. Ortam etkinse eşdeğer komut:
-
-```sh
-python -m uvicorn app.main:app --reload --port 8001
-```
-
-Ayrı bir terminalde (Node.js 20.19+ / 22.12+):
+In this checkout the existing interpreter is `..\.venv\Scripts\python.exe`.
+With an active environment, the equivalent start command is
+`python -m uvicorn app.main:app --reload --port 8001`. In another terminal:
 
 ```sh
 cd frontend
@@ -62,79 +123,34 @@ npm install
 npm run dev
 ```
 
-- [Web arayüzü](http://127.0.0.1:5173)
-- [API](http://127.0.0.1:8001)
-- [Swagger](http://127.0.0.1:8001/docs)
+Frontend: <http://127.0.0.1:5173>. Backend: <http://127.0.0.1:8001>.
+For lockfile-based installation, use `pnpm install --frozen-lockfile` instead.
+`frontend/.env.example` documents `VITE_API_BASE_URL` (public build-time setting).
+Backend `.env.example` documents `FRONTEND_ORIGINS` and `WARDROBE_DATA_DIR`;
+export these in the shell/hosting dashboard (backend does not auto-load .env files).
 
-Frontend varsayılan API adresi `http://127.0.0.1:8001`; geliştirme için
-`VITE_API_BASE_URL` ile değiştirilebilir. CORS, localhost/127.0.0.1:5173
-origin'lerine izin verir.
+### Deployment
 
-## API
+`render.yaml` supplies the backend start/build/health configuration;
+`netlify.toml` supplies the frontend build/publish configuration and production
+URL check. Set the real HTTPS API URL and frontend CORS origin before deploying.
+No public deployment was provisioned in this sprint: neither hosting dashboard
+was authenticated. See [deployment steps and persistence/safety limits](docs/deployment.md).
 
-| Metot | Endpoint | Davranış |
-| --- | --- | --- |
-| GET | `/` | Sağlık mesajı |
-| GET | `/clothes` | Liste; optional category, color, season |
-| GET | `/clothes/{id}` | Tek kıyafet; yoksa 404 |
-| POST | `/clothes` | Multipart metadata ve optional image |
-| PATCH | `/clothes/{id}` | JSON partial update; ClothingResponse döner |
-| DELETE | `/clothes/{id}` | Kayıt ve varsa fotoğrafı siler |
-| GET | `/recommendations` | season ve limit ile kombinler |
-| GET | `/uploads/{filename}` | UUID isimli kullanıcı görseli |
+Local DB/uploads are deliberately excluded from Git. A fresh cloud deployment is
+empty. Free ephemeral hosting loses local SQLite/uploads on restarts/redeploys;
+durable data needs a persistent disk and backups. Public CRUD has no authentication:
+publish disposable demo data only, not irreplaceable or private records.
 
-POST alanları: `name, category, color, season/seasons, style, fit, material,
-formality, image`. Birden fazla mevsim için formda `seasons` alanını tekrar
-gönderin. API response'unda `seasons` her zaman string listesi olarak döner.
-
-PATCH örneği:
-
-```http
-PATCH /clothes/7
-Content-Type: application/json
-
-{
-  "name": "Krem keten gömlek",
-  "seasons": ["spring", "summer"],
-  "style": "smart_casual",
-  "formality": 5
-}
-```
-
-Gönderilmeyen alanlar ve `image_path` korunur. `seasons` güncellenirse legacy
-`season` ilk mevsime eşitlenir. `style/fit/material` null ile temizlenebilir.
-Zorunlu alanlarda null/boş değer, boş mevsim listesi, izin verilmeyen alan
-ve 1–10 dışındaki formality için 422; bulunamayan ID için 404 döner.
-PATCH fotoğraf değiştirmez.
-
-## Kombin motoru · V2.2
-
-Bir üst (`tshirt/shirt/polo/sweater/hoodie`), bir alt
-(`pants/jeans/shorts`) ve `shoes` üzerinden kombinler üretilir.
-Ceketler katman olarak kullanılmaz. Çoklu mevsim, `all-season` ve legacy
-fallback desteklenir. Eksik bilgiler hata oluşturmaz; tarafsız puanlar
-kullanılır ve arayüzde anlaşılır notlarla belirtilir.
-
-```text
-total_score = color × 0.35 + season × 0.25 + style × 0.25 + formality × 0.15
-GET /recommendations?season=summer&limit=3
-```
-
-Limit 1–20 (varsayılan 3); istenen mevsim spring/summer/autumn/fall/winter.
-Yetersiz kategoride boş liste döner. Bu sürümde skor algoritması değişmemiştir.
-
-## Doğrulama
-
-Proje kökünde doğru venv interpreter'ıyla:
+## 9. Testing
 
 ```powershell
+..\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 ..\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ..\.venv\Scripts\python.exe -c "from tests.test_smoke import test_api_smoke_and_metadata_cleanup; test_api_smoke_and_metadata_cleanup()"
-# API çalışırken: yalnızca geçici kıyafet/görsel oluşturur ve finally ile temizler.
+# With the local API running:
 ..\.venv\Scripts\python.exe tests/smoke_live.py
 ```
-
-Frontend:
 
 ```sh
 cd frontend
@@ -142,17 +158,16 @@ npm test
 npm run build
 ```
 
-PATCH unit testleri izole in-memory SQLite kullanır. Mevcut recommendation
-testleri ve canlı smoke testi oluşturdukları geçici kayıtları temizler.
-`tests/smoke_live.py` ayrıca kalıcı kayıtları, tablo şemasını ve fotoğraf
-hash'lerini başlangıç ve bitişte karşılaştırır.
+PATCH tests use in-memory SQLite; deployment tests use temporary storage.
+Live smoke creates/cleans temporary records/photos and compares persistent rows,
+schema and image hashes. UI verification covers add/edit/delete, recommendations,
+loading/error/retry, and 390/768/1024/1440px layouts.
 
-## Mevcut sınırlar ve roadmap
+## 10. Roadmap
 
-Tek kullanıcılı yerel demo; authentication ve production deployment yok.
-Görsel yükleme mevcut MIME kontrolüne dayanır; production öncesi boyut limiti
-ve dosya içeriği doğrulaması gerekli. Çok büyük gardıroplar için kombin
-hesaplamasının ve listelemenin ölçeklendirilmesi planlanabilir.
-Sonraki adımlar: pagination, accessibility test otomasyonu, deployment
-konfigürasyonu ve kullanıcı tercihleri. ML, weather ve auth bu sürümün
-kapsamında değildir.
+- More precise per-piece explanations and recommendation diversity.
+- Upload size/content hardening and repeatable browser accessibility tests.
+- Pagination and scalable combination ranking for larger wardrobes.
+- Managed storage/database and access controls before multi-user production use.
+
+This is a portfolio product demo, not a hardened multi-user production service.

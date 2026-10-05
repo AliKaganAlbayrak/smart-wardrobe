@@ -1,0 +1,3 @@
+-r requirements.txt
+# FastAPI TestClient; production runtime dependencies remain unchanged.
+httpx>=0.27,<1

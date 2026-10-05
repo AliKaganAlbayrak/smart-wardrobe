@@ -4,9 +4,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile
 
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-UPLOADS_DIR = PROJECT_ROOT / "uploads"
+from ..config import UPLOADS_DIR
 
 
 def save_image(image: UploadFile | None) -> str | None:

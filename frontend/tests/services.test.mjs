@@ -4,9 +4,9 @@ import { readFile } from "node:fs/promises";
 import ts from "typescript";
 
 // Exercise the real TypeScript modules using the compiler already in devDependencies.
-async function loadModule(path) {
+async function loadModule(path, apiBase = "http://127.0.0.1:8001") {
   const source = (await readFile(new URL(path, import.meta.url), "utf8"))
-    .replace("import.meta.env.VITE_API_BASE_URL", '"http://127.0.0.1:8001"');
+    .replace("import.meta.env.VITE_API_BASE_URL", JSON.stringify(apiBase));
   const output = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
   }).outputText;
@@ -49,4 +49,35 @@ test("recommendation URL and static image URLs remain compatible", async (t) => 
   });
   assert.deepEqual((await api.getRecommendations("summer", 5)).recommendations, []);
   assert.equal(api.imageUrl("uploads/demo.jpg"), "http://127.0.0.1:8001/uploads/demo.jpg");
+});
+
+test("production API URL is trimmed and used for requests and images", async (t) => {
+  const production = await loadModule("../src/services/api.ts", " https://wardrobe-api.example/// ");
+  t.mock.method(globalThis, "fetch", async (url) => {
+    assert.equal(url, "https://wardrobe-api.example/clothes");
+    return new Response(JSON.stringify({ clothes: [] }));
+  });
+  assert.deepEqual(await production.getClothes(), { clothes: [] });
+  assert.equal(production.imageUrl("uploads/demo.jpg"), "https://wardrobe-api.example/uploads/demo.jpg");
+  const fallback = await loadModule("../src/services/api.ts", "");
+  assert.equal(fallback.API_BASE_URL, "http://127.0.0.1:8001");
+});
+
+test("multipart creation preserves seasons and photo; failed requests can retry", async (t) => {
+  const image = new File(["demo"], "demo.jpg", { type: "image/jpeg" });
+  let calls = 0;
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    calls++;
+    assert.equal(url, "http://127.0.0.1:8001/clothes");
+    assert.equal(init.method, "POST");
+    assert.ok(init.body instanceof FormData);
+    assert.deepEqual(init.body.getAll("seasons"), ["spring", "summer"]);
+    assert.equal(init.body.get("image").name, "demo.jpg");
+    if (calls === 1) return new Response(JSON.stringify({ detail: "Temporary failure" }), { status: 503 });
+    return new Response(JSON.stringify({ message: "ok", clothing: { id: 7 } }));
+  });
+  const input = { name: "Demo", category: "shirt", color: "cream", seasons: ["spring", "summer"],
+    style: "smart_casual", fit: "regular", material: "cotton", formality: 5, image };
+  await assert.rejects(api.createClothing(input), /Temporary failure/);
+  assert.equal((await api.createClothing(input)).clothing.id, 7);
 });
