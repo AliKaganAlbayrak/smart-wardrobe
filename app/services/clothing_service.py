@@ -5,6 +5,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..models import ClothingDB
+from ..schemas import ClothingUpdate
 from .image_service import delete_image, save_image
 
 
@@ -132,3 +133,17 @@ def delete_clothing(db: Session, clothing_id: int):
     delete_image(clothing.image_path)
     db.delete(clothing)
     db.commit()
+
+
+def update_clothing(db: Session, clothing_id: int, update: ClothingUpdate) -> ClothingDB:
+    clothing = get_clothing(db, clothing_id)
+    values = update.model_dump(exclude_unset=True)
+    if "seasons" in values:
+        seasons = normalize_seasons(None, values.pop("seasons"))
+        values["seasons"] = json.dumps(seasons)
+        values["season"] = seasons[0]  # Keep legacy clients compatible.
+    for field, value in values.items():
+        setattr(clothing, field, value)
+    db.commit()
+    db.refresh(clothing)
+    return clothing

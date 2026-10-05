@@ -69,3 +69,14 @@ export interface CreateClothingInput {
   formality: number;
   image: File | null;
 }
+
+export type ClothingDraft = Pick<Clothing, "name" | "category" | "color" | "seasons"> & {
+  style: string;
+  fit: string;
+  material: string;
+  formality: number | null;
+};
+
+export type ClothingUpdate = Partial<Pick<Clothing,
+  "name" | "category" | "color" | "seasons" | "style" | "fit" | "material"
+>> & { formality?: number };

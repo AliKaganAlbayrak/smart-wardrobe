@@ -12,7 +12,7 @@ export function ScoreBar({ label, value }: ScoreBarProps) {
         <span>{label}</span>
         <strong>{percentage}%</strong>
       </div>
-      <div className="score-track" aria-label={`${label}: yüzde ${percentage}`}>
+      <div className="score-track" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percentage}>
         <span style={{ width: `${percentage}%` }} />
       </div>
     </div>

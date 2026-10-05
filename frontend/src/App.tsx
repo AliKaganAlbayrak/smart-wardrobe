@@ -14,10 +14,12 @@ const pageTitles: Record<PageName, string> = {
 export default function App() {
   const [activePage, setActivePage] = useState<PageName>("wardrobe");
   const [refreshKey, setRefreshKey] = useState(0);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string } | null>(null);
+  const showSuccess = (message: string) => setToast({ message });
 
   useEffect(() => {
     document.title = `${pageTitles[activePage]} · Smart Wardrobe`;
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [activePage]);
 
   useEffect(() => {
@@ -28,7 +30,7 @@ export default function App() {
 
   const handleCreated = (message: string) => {
     setRefreshKey((value) => value + 1);
-    setToast(message);
+    showSuccess(message);
     setActivePage("wardrobe");
   };
 
@@ -36,11 +38,11 @@ export default function App() {
     <div className="app-shell">
       <Sidebar activePage={activePage} onNavigate={setActivePage} />
       <main className="main-content">
-        {activePage === "wardrobe" && <WardrobePage refreshKey={refreshKey} onAddRequested={() => setActivePage("add")} />}
+        {activePage === "wardrobe" && <WardrobePage refreshKey={refreshKey} onAddRequested={() => setActivePage("add")} onSuccess={showSuccess} />}
         {activePage === "add" && <AddClothingPage onCreated={handleCreated} />}
         {activePage === "recommendations" && <RecommendationsPage />}
       </main>
-      {toast && <div className="toast"><span>✓</span>{toast}</div>}
+      {toast && <div className="toast" role="status"><span aria-hidden="true">✓</span>{toast.message}<button aria-label="Bildirimi kapat" onClick={() => setToast(null)}>×</button></div>}
     </div>
   );
 }

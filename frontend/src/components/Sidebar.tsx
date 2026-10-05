@@ -27,6 +27,7 @@ export function Sidebar({ activePage, onNavigate }: SidebarProps) {
           <button
             key={item.id}
             className={`nav-item ${activePage === item.id ? "active" : ""}`}
+            aria-current={activePage === item.id ? "page" : undefined}
             onClick={() => onNavigate(item.id)}
           >
             <span className="nav-icon" aria-hidden="true">{item.icon}</span>
@@ -37,7 +38,7 @@ export function Sidebar({ activePage, onNavigate }: SidebarProps) {
 
       <div className="sidebar-footer">
         <span className="status-dot" />
-        Gardırobun hazır
+        Kişisel stil arşivin
       </div>
     </aside>
   );

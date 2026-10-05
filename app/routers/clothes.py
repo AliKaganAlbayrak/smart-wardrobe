@@ -7,6 +7,7 @@ from ..schemas import (
     ClothingDeleteResponse,
     ClothingListResponse,
     ClothingResponse,
+    ClothingUpdate,
 )
 from ..services.clothing_service import (
     create_clothing,
@@ -14,6 +15,7 @@ from ..services.clothing_service import (
     get_clothing,
     list_clothes,
     serialize_clothing,
+    update_clothing,
 )
 
 
@@ -81,3 +83,12 @@ def delete_clothing_by_id(
 ):
     delete_clothing(db, clothing_id)
     return {"message": "Kıyafet başarıyla silindi", "id": clothing_id}
+
+
+@router.patch("/clothes/{clothing_id}", response_model=ClothingResponse)
+def patch_clothing(
+    clothing_id: int,
+    update: ClothingUpdate,
+    db: Session = Depends(get_db),
+):
+    return serialize_clothing(update_clothing(db, clothing_id, update))

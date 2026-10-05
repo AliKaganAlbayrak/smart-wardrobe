@@ -1,5 +1,7 @@
 import type {
   ClothingCreateResponse,
+  Clothing,
+  ClothingUpdate,
   ClothingDeleteResponse,
   ClothingListResponse,
   CreateClothingInput,
@@ -21,8 +23,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let message = `İstek başarısız oldu (${response.status}).`;
     try {
-      const payload = (await response.json()) as { detail?: string };
-      if (payload.detail) message = payload.detail;
+      const payload: unknown = await response.json();
+      if (typeof payload === "object" && payload !== null && "detail" in payload) {
+        if (typeof payload.detail === "string") message = payload.detail;
+        else if (Array.isArray(payload.detail)) {
+          message = "Bazı bilgiler geçerli değil. Zorunlu alanları, mevsimleri ve 1–10 arasındaki resmiyet değerini kontrol edin.";
+        }
+      }
     } catch {
       // Keep the HTTP fallback message when the response has no JSON body.
     }
@@ -30,6 +37,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+export async function updateClothing(id: number, input: ClothingUpdate): Promise<Clothing> {
+  return request<Clothing>(`/clothes/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
 }
 
 export function imageUrl(imagePath: string | null): string | null {

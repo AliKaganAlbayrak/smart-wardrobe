@@ -1,88 +1,60 @@
 # Smart Wardrobe
 
-## Project Overview
+Kıyafetlerini fotoğrafları ve detaylarıyla saklayan, mevcut gardırobundan
+açıklanabilir kombinler üreten bir yerel web uygulaması.
 
-Smart Wardrobe, kullanıcının kıyafetlerini kaydetmesini ve ileride hava durumu,
-renk uyumu, mevsim ve kişisel tercihlere göre kombin önerileri almasını sağlayacak
-kişisel gardırop uygulamasıdır. Mevcut sürüm, kıyafet kaydetme, listeleme ve
-deterministic rule-based kombin önerileri sunan bir REST API ve React web
-arayüzü içerir.
+## Özellikler
 
-## Current Features
+- Fotoğraflı gardırop; kategori, renk, mevsim ve stil filtreleri.
+- Kıyafet ekleme, önceden doldurulmuş panelde düzenleme ve onaylı silme.
+- Çoklu mevsim, legacy `season` uyumluluğu ve 1–10 resmiyet doğrulaması.
+- Renk, mevsim, stil ve resmiyet puanlarıyla deterministic kombin önerileri.
+- Explicit **Kombin Oluştur** akışı; loading, hata, retry ve başarı bildirimleri.
+- Desktop, tablet ve mobil ekranlara uyarlanan React arayüzü.
 
-- İsim, kategori, renk ve mevsim bilgileriyle, isteğe bağlı görsel dosyasıyla kıyafet kaydetme.
-- Kayıtlı kıyafetleri listeleme.
-- SQLite veritabanında kalıcı veri saklama.
-- Multipart form verilerinin ve görsel yüklemelerinin desteklenmesi.
-- Açıklanabilir, rule-based ilk kombin öneri motoru.
-- FastAPI tarafından oluşturulan etkileşimli API dokümantasyonu.
-- Gardırop, kıyafet ekleme ve açıklanabilir kombin önerileri için responsive web arayüzü.
+## Mimari ve stack
 
-| Metot | Endpoint | Açıklama |
-| --- | --- | --- |
-| GET | `/` | API'nin çalıştığını belirten mesajı döndürür. |
-| POST | `/clothes` | Yeni bir kıyafet kaydeder. |
-| GET | `/clothes` | Kayıtlı kıyafetleri listeler; kategori, renk ve mevsime göre filtrelenebilir. |
-| GET | `/clothes/{clothing_id}` | ID ile tek bir kıyafeti getirir. |
-| DELETE | `/clothes/{clothing_id}` | Kıyafeti ve varsa görselini siler. |
-| GET | `/recommendations` | Kıyafetlerden skorlanmış kombin önerileri üretir. |
+```text
+app/
+  main.py                  # FastAPI, CORS, /uploads static serving
+  database.py, models.py   # SQLAlchemy 2 + SQLite
+  schemas.py              # Pydantic validation
+  routers/                # clothes ve recommendations HTTP endpointleri
+  services/               # clothing, image, recommendation iş mantığı
+frontend/src/
+  components/             # Kartlar, ortak form alanları, modal, feedback
+  pages/                  # Gardırop, kıyafet ekleme, kombin önerileri
+  services/               # Merkezi API istemcisi ve görüntüleme etiketleri
+  types/, styles/         # TypeScript tipleri ve plain CSS
+tests/                    # Backend unit ve smoke testleri
+```
 
-## Tech Stack
+Backend: Python 3.10+, FastAPI, Uvicorn, SQLAlchemy, Pydantic, SQLite,
+python-multipart. Frontend: React, TypeScript, Vite; ağır UI framework yok.
 
-- **Python** — uygulama dili.
-- **FastAPI** — REST API çatısı.
-- **Uvicorn** — ASGI sunucusu.
-- **SQLAlchemy 2.x** — veritabanı modelleri ve erişimi.
-- **Pydantic** — veri doğrulama.
-- **SQLite** — yerel veritabanı; Python ile birlikte gelir.
-- **React + TypeScript** — web arayüzü.
-- **Vite** — frontend geliştirme ve build aracı.
+SQLite ve upload yolları proje köküne göre çözülür; çalışma dizinine bağımlı
+değildir. `wardrobe.db`, `uploads/`, virtual environment ve build/cache
+dosyaları Git dışında tutulur.
 
-## Installation
+## Yerelde çalıştırma
 
-Python 3.10 veya üzeri önerilir. Terminali proje kök dizininde açın.
+Proje kökünde sanal ortam yoksa oluşturun ve bağımlılıkları kurun:
 
-1. Sanal ortam oluşturun:
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8001
+```
 
-   ```sh
-   python -m venv .venv
-   ```
-
-2. Sanal ortamı etkinleştirin:
-
-   Windows PowerShell:
-
-   ```powershell
-   .\.venv\Scripts\Activate.ps1
-   ```
-
-   macOS / Linux:
-
-   ```sh
-   source .venv/bin/activate
-   ```
-
-3. Bağımlılıkları yükleyin:
-
-   ```sh
-   python -m pip install -r requirements.txt
-   ```
-
-## Running the API
-
-Proje kök dizininde, sanal ortam etkin durumdayken geliştirme sunucusunu başlatın:
+Bu projede ortam üst klasördeyse aynı komutlarda
+`..\.venv\Scripts\python.exe` kullanın. Aktivasyon veya PowerShell
+Execution Policy değişikliği gerekmez. Ortam etkinse eşdeğer komut:
 
 ```sh
 python -m uvicorn app.main:app --reload --port 8001
 ```
 
-- [API ana sayfası](http://127.0.0.1:8001/)
-- [Swagger UI](http://127.0.0.1:8001/docs)
-- [ReDoc](http://127.0.0.1:8001/redoc)
-
-## Running the Frontend
-
-Backend'i `8001` portunda çalıştırdıktan sonra ayrı bir terminal açın:
+Ayrı bir terminalde (Node.js 20.19+ / 22.12+):
 
 ```sh
 cd frontend
@@ -90,139 +62,97 @@ npm install
 npm run dev
 ```
 
-Web arayüzü [http://127.0.0.1:5173](http://127.0.0.1:5173) adresinde açılır.
-Development API adresi varsayılan olarak `http://127.0.0.1:8001` değeridir;
-gerekirse `VITE_API_BASE_URL` environment variable ile değiştirilebilir.
+- [Web arayüzü](http://127.0.0.1:5173)
+- [API](http://127.0.0.1:8001)
+- [Swagger](http://127.0.0.1:8001/docs)
 
-Uygulama ilk açılışta `wardrobe.db` dosyasını ve gerekli tabloları otomatik
-oluşturur. Veritabanı ve gelecekte kullanılacak `uploads/` dizini Git'e dahil edilmez.
+Frontend varsayılan API adresi `http://127.0.0.1:8001`; geliştirme için
+`VITE_API_BASE_URL` ile değiştirilebilir. CORS, localhost/127.0.0.1:5173
+origin'lerine izin verir.
 
-Swagger UI üzerinden `POST /clothes` için örnek istek gövdesi:
+## API
 
-```text
-POST /clothes (multipart/form-data)
+| Metot | Endpoint | Davranış |
+| --- | --- | --- |
+| GET | `/` | Sağlık mesajı |
+| GET | `/clothes` | Liste; optional category, color, season |
+| GET | `/clothes/{id}` | Tek kıyafet; yoksa 404 |
+| POST | `/clothes` | Multipart metadata ve optional image |
+| PATCH | `/clothes/{id}` | JSON partial update; ClothingResponse döner |
+| DELETE | `/clothes/{id}` | Kayıt ve varsa fotoğrafı siler |
+| GET | `/recommendations` | season ve limit ile kombinler |
+| GET | `/uploads/{filename}` | UUID isimli kullanıcı görseli |
 
-name=Beyaz tişört
-category=Üst giyim
-color=Beyaz
-season=Yaz
-image=<bir görsel dosyası>
-```
+POST alanları: `name, category, color, season/seasons, style, fit, material,
+formality, image`. Birden fazla mevsim için formda `seasons` alanını tekrar
+gönderin. API response'unda `seasons` her zaman string listesi olarak döner.
 
-Görsel yüklenirse proje kökündeki `uploads/` klasörüne UUID tabanlı benzersiz
-dosya adıyla kaydedilir ve kaydın `image_path` alanında tutulur. Görsel alanı
-isteğe bağlıdır.
+PATCH örneği:
 
-Yüklenen görseller `/uploads/<dosya_adı>` URL'si üzerinden servis edilir.
+```http
+PATCH /clothes/7
+Content-Type: application/json
 
-### Swagger test senaryoları
-
-Uygulamayı çalıştırdıktan sonra [Swagger UI](http://127.0.0.1:8001/docs)
-üzerinden:
-
-1. `POST /clothes` ile form alanlarını ve isteğe bağlı bir görseli gönderin.
-2. `GET /clothes` ile tüm kayıtları listeleyin.
-3. `GET /clothes?category=shirt&color=cream` ile filtreleri deneyin.
-4. `GET /clothes/{clothing_id}` ile oluşturduğunuz kaydı getirin.
-5. `DELETE /clothes/{clothing_id}` ile kaydı silin; görsel dosyasının da silindiğini kontrol edin.
-6. Olmayan bir ID için GET ve DELETE isteklerinde `404` bekleyin.
-7. Filtreleri boş bıraktığınızda (`/clothes`) tüm kayıtların dönmesini bekleyin.
-
-Çalıştırma komutu:
-
-```powershell
-..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8001
-```
-
-## Roadmap
-
-### Recommendation engine
-
-Motor AI/LLM kullanmaz; `app/services/recommendation.py` içindeki deterministic
-kurallarla çalışır. Bir kombin için bir üst (`tshirt`, `shirt`, `polo`,
-`sweater`, `hoodie`), bir alt (`pants`, `jeans`, `shorts`) ve `shoes` kategorisi
-gerekir. `jacket` şimdilik katmanlı kombinlere dahil edilmez. Renk uyumu üç
-çiftin (üst-alt, üst-ayakkabı, alt-ayakkabı) ortalamasıyla hesaplanır. Kıyafetin
-`seasons` listesi kullanılır; eski kayıtlar için tekil `season` alanına fallback
-yapılır. `all-season` değeri tüm mevsimlerde kısmi uyumluluk sağlar. Renk, stil
-ve resmiyet metadata'sı eksik olduğunda tarafsız fallback uygulanır.
-
-Skor formülü:
-
-```text
-total_score = (
-    color_score * 0.35
-    + season_score * 0.25
-    + style_score * 0.25
-    + formality_score * 0.15
-)
-```
-
-Örnek istekler:
-
-```text
-GET /recommendations
-GET /recommendations?season=summer&limit=3
-```
-
-`season` için desteklenen değerler `spring`, `summer`, `autumn`/`fall` ve
-`winter` değerleridir. `limit` değeri 1 ile 20 arasında olmalıdır; varsayılan
-değer 3, maksimum değer 20'dir. Geçersiz season veya limit değeri `422` döner.
-
-Örnek response:
-
-```json
 {
-  "recommendations": [
-    {
-      "score": 0.9463,
-      "top": {
-        "id": 1,
-        "name": "Beyaz tişört",
-        "category": "shirt",
-        "color": "white",
-        "season": "summer",
-        "image_path": null
-      },
-      "bottom": {
-        "id": 2,
-        "name": "Lacivert pantolon",
-        "category": "pants",
-        "color": "navy",
-        "season": "summer",
-        "image_path": null
-      },
-      "shoes": {
-        "id": 3,
-        "name": "Siyah ayakkabı",
-        "category": "shoes",
-        "color": "black",
-        "season": "summer",
-        "image_path": null
-      },
-      "details": {
-        "color_score": 0.9233,
-        "season_score": 1.0,
-        "style_score": 0.8,
-        "formality_score": 0.8889,
-        "total_score": 0.9065,
-        "reasons": [
-          "Renk uyumu yüksek (0.92).",
-          "Mevsim uyumu yüksek (1.00)."
-        ],
-        "penalties": []
-      }
-    }
-  ],
-  "message": null
+  "name": "Krem keten gömlek",
+  "seasons": ["spring", "summer"],
+  "style": "smart_casual",
+  "formality": 5
 }
 ```
 
-Öneri üretmek için yeterli kategori yoksa server hata vermez; boş liste ve
-eksik kategorileri açıklayan bir `message` döndürür.
+Gönderilmeyen alanlar ve `image_path` korunur. `seasons` güncellenirse legacy
+`season` ilk mevsime eşitlenir. `style/fit/material` null ile temizlenebilir.
+Zorunlu alanlarda null/boş değer, boş mevsim listesi, izin verilmeyen alan
+ve 1–10 dışındaki formality için 422; bulunamayan ID için 404 döner.
+PATCH fotoğraf değiştirmez.
 
-- Kıyafet güncelleme ve silme.
-- Hava durumu verilerinin entegrasyonu.
-- Renk uyumu ve mevsime göre kombin önerileri.
-- Kişisel tercihlere göre önerilerin özelleştirilmesi.
-- Gardırop yönetimi için kullanıcı arayüzü.
+## Kombin motoru · V2.2
+
+Bir üst (`tshirt/shirt/polo/sweater/hoodie`), bir alt
+(`pants/jeans/shorts`) ve `shoes` üzerinden kombinler üretilir.
+Ceketler katman olarak kullanılmaz. Çoklu mevsim, `all-season` ve legacy
+fallback desteklenir. Eksik bilgiler hata oluşturmaz; tarafsız puanlar
+kullanılır ve arayüzde anlaşılır notlarla belirtilir.
+
+```text
+total_score = color × 0.35 + season × 0.25 + style × 0.25 + formality × 0.15
+GET /recommendations?season=summer&limit=3
+```
+
+Limit 1–20 (varsayılan 3); istenen mevsim spring/summer/autumn/fall/winter.
+Yetersiz kategoride boş liste döner. Bu sürümde skor algoritması değişmemiştir.
+
+## Doğrulama
+
+Proje kökünde doğru venv interpreter'ıyla:
+
+```powershell
+..\.venv\Scripts\python.exe -m unittest discover -s tests -v
+..\.venv\Scripts\python.exe -c "from tests.test_smoke import test_api_smoke_and_metadata_cleanup; test_api_smoke_and_metadata_cleanup()"
+# API çalışırken: yalnızca geçici kıyafet/görsel oluşturur ve finally ile temizler.
+..\.venv\Scripts\python.exe tests/smoke_live.py
+```
+
+Frontend:
+
+```sh
+cd frontend
+npm test
+npm run build
+```
+
+PATCH unit testleri izole in-memory SQLite kullanır. Mevcut recommendation
+testleri ve canlı smoke testi oluşturdukları geçici kayıtları temizler.
+`tests/smoke_live.py` ayrıca kalıcı kayıtları, tablo şemasını ve fotoğraf
+hash'lerini başlangıç ve bitişte karşılaştırır.
+
+## Mevcut sınırlar ve roadmap
+
+Tek kullanıcılı yerel demo; authentication ve production deployment yok.
+Görsel yükleme mevcut MIME kontrolüne dayanır; production öncesi boyut limiti
+ve dosya içeriği doğrulaması gerekli. Çok büyük gardıroplar için kombin
+hesaplamasının ve listelemenin ölçeklendirilmesi planlanabilir.
+Sonraki adımlar: pagination, accessibility test otomasyonu, deployment
+konfigürasyonu ve kullanıcı tercihleri. ML, weather ve auth bu sürümün
+kapsamında değildir.
