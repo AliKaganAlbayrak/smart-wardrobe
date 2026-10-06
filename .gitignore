@@ -29,3 +29,26 @@ frontend/vite.config.d.ts
 .vscode/
 .netlify/
 .vercel/
+
+# Additional local databases, caches and test artifacts
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage*
+htmlcov/
+coverage/
+*.log
+frontend/qa-*.html
+
+# Private credentials and signing material
+.aws/
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json

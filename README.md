@@ -1,229 +1,344 @@
 # Smart Wardrobe
 
-## 1. Project Overview
+A full-stack smart wardrobe application that allows users to manage their personal clothing collection and generate context-aware outfit recommendations.
 
-A multi-user wardrobe application with private photo-based clothing management and
-deterministic, explainable outfit recommendations. A modular FastAPI API powers a
-responsive React dashboard; Supabase Auth provides email/password accounts.
-No ML or external weather service is required.
+[![CI](https://github.com/AliKaganAlbayrak/smart-wardrobe/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AliKaganAlbayrak/smart-wardrobe/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white)
 
-## 2. Features
+## Project Overview
 
-- Clothing CRUD and partial editing via PATCH; metadata and multiple seasons.
-- Email/password registration, email confirmation, login/logout and persistent sessions.
-- Verified-token authorization and UUID ownership for CRUD, filters and recommendations.
-- Multipart image uploads with UUID filenames; owner folders and authenticated downloads.
-- Category, color, season and frontend style filters.
-- Ranked outfits with color, season, style and formality scores and explanations.
-- Responsive cards, edit/confirmation dialogs, image preview, loading/error/retry states.
+Smart Wardrobe combines a responsive clothing dashboard with a deterministic,
+explainable recommendation engine. Each account has a private collection:
+clothing, photos and recommendations are scoped to the authenticated user.
 
-## 3. Screenshots
+The modular backend uses FastAPI and SQLAlchemy. Production records and images
+live in Supabase PostgreSQL and private Storage, independently of the backend's
+ephemeral filesystem. No ML model or weather service is required.
 
-Historical local UI screenshots, using the six original wardrobe items. The current
-version adds login/registration; unowned legacy data is preserved but hidden.
+## Live Demo
 
-### Wardrobe
+- **Application:** [Smart Wardrobe on Netlify](https://wonderful-quokka-3c636d.netlify.app)
+- **API documentation:** [Interactive Swagger UI](https://smart-wardrobe-api-xskr.onrender.com/docs)
+- **Backend health:** [FastAPI root endpoint](https://smart-wardrobe-api-xskr.onrender.com/)
+- **Source:** [AliKaganAlbayrak/smart-wardrobe](https://github.com/AliKaganAlbayrak/smart-wardrobe)
 
-![Wardrobe](docs/screenshots/wardrobe.jpg)
+Register with your own email address and confirm it before signing in.
+A new account starts with an empty wardrobe; there is no shared demo account.
+The Render free instance may take a short time to wake after inactivity.
 
-### Add clothing
+## Key Features
 
-![Add clothing](docs/screenshots/add-clothing.jpg)
+- Registration, email confirmation, login/logout and persistent, refreshed sessions.
+- Private wardrobes with photo upload, listing, viewing, partial editing and deletion.
+- Clothing metadata: category, color, style, fit, material, formality and multiple seasons.
+- Category, color and season API filters; additional style filtering in the frontend.
+- Rule-based outfit ranking with color, season, style and formality compatibility.
+- Explainable scores, reasons and penalties; optional autumn/winter jackets.
+- Responsive cards, image previews, edit dialogs, confirmation, loading/error/retry feedback.
+- Persistent PostgreSQL records and private images across backend redeploys.
 
-### Outfit recommendations
+## Multi-user Architecture
 
-![Outfit recommendations](docs/screenshots/recommendations.jpg)
+Each clothing row has an indexed UUID `owner_id`. New ownership comes exclusively
+from the server-verified current user, never from a submitted `user_id` or `owner_id`.
 
-## 4. Architecture
+CRUD, PATCH, filtered lists, recommendations and image downloads enforce ownership.
+Legacy rows without an owner are preserved but hidden; they are not automatically
+assigned to the next person who signs in. The application does not expose a
+client-side administrative data API.
 
-```text
-app/
-  main.py, auth.py, config.py, database.py, models.py, schemas.py
-  routers/     clothes.py, recommendations.py
-  services/    clothing_service.py, image_service.py, storage.py, recommendation.py
-  migrate.py   explicit production schema bootstrap/additive migrations
-frontend/src/
-  components/  reusable forms, cards, dialogs and feedback
-  pages/       login/register, wardrobe, add clothing, recommendations
-  services/    Supabase client, session store, authenticated API client, labels
-  types/, styles/
-tests/         backend unit and live API smoke tests
-docs/          screenshots, quality audit and deployment runbook
-```
+## Authentication & Authorization
 
-Routers handle HTTP; services handle storage/business logic. The recommendation
-service works on supplied objects without database access. Local SQLite and uploads
-share a configurable data directory; defaults remain at the project root. Production
-uses PostgreSQL via `DATABASE_URL` and Supabase Storage, independent of Render's disk.
-Every protected request verifies its bearer access token with the Supabase Auth API;
-the backend never trusts a supplied user ID. Clothing queries are scoped to the
-verified UUID. A private bucket and restrictive RLS guards prevent direct client
-bypasses. Photos are fetched through an owner-authorized backend endpoint.
+The frontend uses Supabase Auth for email/password accounts, persistent sessions,
+PKCE email-confirmation handling and automatic access-token refresh.
+A centralized API client attaches the current bearer token and handles expiration.
 
-## 5. Tech Stack
+FastAPI verifies each access token with the configured Supabase project's
+`/auth/v1/user` endpoint. It does not trust locally decoded JWT claims.
+Missing, invalid or expired tokens return **401**; a foreign owner's clothing ID
+returns **403**; missing or unowned legacy records return **404**.
+Root and Swagger are public; clothing and recommendation routes require a user token.
 
-Backend: Python, FastAPI, Pydantic, SQLAlchemy 2, SQLite/PostgreSQL (psycopg), Uvicorn,
-python-multipart and httpx (Supabase Auth/Storage REST). Frontend: React, TypeScript,
-Vite, Supabase JS and plain CSS. Tests: Python
-unittest, FastAPI TestClient and Node's built-in test runner.
+## Outfit Recommendation Engine
 
-## 6. Recommendation Engine
+The engine creates the Cartesian product of eligible **top + bottom + shoes**,
+scores each outfit, and returns the highest-ranked results with deterministic ID
+tie-breaking. It operates on supplied clothing objects, without database access.
 
-V2.2 forms one top (`tshirt/shirt/polo/sweater/hoodie`), one bottom
-(`pants/jeans/shorts`) and shoes; autumn/winter may include one suitable
-`jacket` (also recognizing `coat`). Pairwise color/style/
-formality compatibility is averaged. Multiple seasons, `all-season` and legacy
-`season` fallback are supported. Missing color/style/formality metadata receives
-a neutral fallback; missing season data is penalized.
+- Tops: `tshirt`, `shirt`, `polo`, `sweater`, `hoodie`.
+- Bottoms: `pants`, `jeans`, `shorts`; footwear: `shoes`.
+- Outer layer: one compatible `jacket` or `coat`, only for autumn/winter.
+
+| Component | Weight | Evaluation |
+| --- | --- | --- |
+| Color | 35% | Normalized Turkish/English names, neutral, monochrome, earth-tone and explicit pair rules |
+| Season | 25% | Multiple seasons, `all-season` and legacy `season` fallback |
+| Style | 25% | Compatibility between casual, smart casual, formal and sport |
+| Formality | 15% | Distance between 1–10 formality values |
+
+Color, style and formality average the three core pair scores. Season averages the
+three pieces: an exact match scores 1.0, all-season suitability 0.85 and a mismatch
+0.10. Unknown color/style or missing formality receives a neutral 0.5 fallback,
+not a perfect score. Fit and material are displayed but do not affect ranking.
 
 ```text
 weighted = color × 0.35 + season × 0.25 + style × 0.25 + formality × 0.15
 quality_factor = season_score if a season is requested and season_score < 0.80 else 1
-total = clamp((weighted + jacket_bonus) × quality_factor, 0, 1)
-GET /recommendations?season=spring&limit=3
+total_score = clamp((weighted + jacket_bonus) × quality_factor, 0, 1)
 ```
 
-Scores are bounded to 0–1 and exposed with reasons/penalties. Stable ID tie-breaking
-makes repeated requests deterministic. Limit is 1–20 (default 3). Seasons:
-spring, summer, autumn/fall, winter, all-season (plus all/any aliases).
-Exact season matches score 1; `all-season` scores 0.85; mismatches score 0.10.
-The core outfit's color/style/formality calculations and weights are unchanged.
-An eligible jacket adds up to 0.05, scaled by its compatibility with the core
-pieces; the season quality penalty also applies to that bonus. Jackets are never
-added for spring, summer or an unspecified season. One best jacket per core outfit
-avoids near-duplicate results. The additive nullable `jacket` response uses the same
-clothing serializer, including a `seasons` array. Reasons and penalties identify
-the outer layer and unsuitable pieces; details expose `jacket_bonus` and
-`season_quality_factor` alongside existing scores.
-The frontend renders top → optional jacket → bottom → shoes, with four pieces
-on desktop/tablet and a two-by-two layered layout on mobile. Responses without a
-jacket retain the original three-piece layout and explanation sections.
-Out-of-season pieces are penalized, not excluded. See the historical
-[real six-item quality audit](docs/recommendation-quality.md), including the lack
-of a summer bottom and cross-request repetition. Fit/material do not affect scores.
+A suitable jacket adds a compatibility-scaled bonus of up to 0.05. It cannot
+compensate for an unsuitable core outfit. Each result retains its clothing objects
+and `score`; `details` includes component scores, `total_score`, `reasons`,
+`penalties`, `jacket_bonus` and `season_quality_factor`.
+An incomplete wardrobe returns an empty result and a helpful message, not a server error.
 
-## 7. API Endpoints
+## Image Storage
 
-| Method | Path | Purpose |
+Multipart uploads use UUID filenames and preserve the supplied extension.
+Production objects are stored in the private `clothing-images` bucket as:
+
+```text
+<owner UUID>/<image UUID>.<extension>
+```
+
+The database stores the durable object key. API `image_path` is an authenticated
+route such as `clothes/123/image`, not a public or expiring image URL.
+The backend checks ownership before downloading or deleting an object. The React
+client requests the image with a token and renders a temporary Blob URL.
+
+Local development uses `uploads/<owner UUID>/<image UUID>.<extension>`.
+Neither local uploads nor the SQLite database belongs in Git.
+
+## Tech Stack
+
+| Layer | Technologies |
+| --- | --- |
+| Backend | Python 3.13, FastAPI, Pydantic, SQLAlchemy 2, Uvicorn |
+| Persistence | PostgreSQL + psycopg in production; SQLite locally |
+| Identity & images | Supabase Auth, private Supabase Storage, server-side HTTPX adapters |
+| Frontend | React 19, TypeScript 5.9, Vite 7, Supabase JS, plain CSS |
+| Tests | Python unittest, FastAPI TestClient, Node's built-in test runner |
+| Delivery | GitHub Actions, Render backend, Netlify frontend |
+
+## Architecture
+
+```mermaid
+flowchart TD
+    User["User"] --> Frontend["React / Vite frontend · Netlify"]
+    Frontend -->|"Sign-up, login, session refresh"| Auth["Supabase Auth"]
+    Frontend -->|"HTTPS + bearer access token"| Backend["FastAPI backend · Render"]
+    Backend -->|"Verify access token"| Auth
+    Backend -->|"Owner-scoped SQLAlchemy queries"| Database["Supabase PostgreSQL"]
+    Backend -->|"Authorized upload / read / delete"| Storage["Private Supabase Storage"]
+```
+
+Routers define HTTP contracts, schemas validate responses and updates, and services
+handle clothing operations, storage and recommendation scoring.
+
+## Project Structure
+
+```text
+app/
+  main.py                   FastAPI app, routers, CORS and private response headers
+  auth.py                   Supabase token verification and current-user dependency
+  config.py, database.py     Environment configuration, engine and sessions
+  models.py, schemas.py      ORM model and Pydantic contracts
+  migrate.py                Bounded schema preflight and additive migrations
+  database_diagnostics.py   Credential-safe database diagnostics
+  routers/                  Clothing and recommendation endpoints
+  services/                 Clothing, image storage and recommendation logic
+frontend/
+  src/components/           Reusable UI, private images and auth gate
+  src/pages/                Auth, wardrobe, add clothing and recommendations
+  src/services/             Auth/session store, API client and presentation helpers
+  src/types/, src/styles/   Shared types and responsive CSS
+  tests/, scripts/          Service/auth tests and production config validation
+tests/                      Isolated backend and security tests
+docs/                       Deployment, authentication and screenshot documentation
+.github/workflows/ci.yml     Automated project checks
+render.yaml, netlify.toml    Hosting configuration
+```
+
+## API Overview
+
+| Method | Endpoint | Purpose |
 | --- | --- | --- |
-| GET | `/` | Root/health message |
-| GET | `/clothes` | List; optional category/color/season queries |
-| POST | `/clothes` | Multipart clothing + optional image |
-| GET | `/clothes/{id}` | Retrieve one item |
-| PATCH | `/clothes/{id}` | JSON partial metadata update |
-| DELETE | `/clothes/{id}` | Delete record and associated image |
-| GET | `/recommendations` | Ranked outfits; season/limit queries |
-| GET | `/clothes/{id}/image` | Owner-authorized photo download |
+| GET | `/` | Public process-health response |
+| GET | `/docs` | Public interactive API documentation |
+| GET | `/clothes` | Own wardrobe; optional category, color and season filters |
+| POST | `/clothes` | Multipart clothing creation and optional image upload |
+| GET | `/clothes/{clothing_id}` | Own clothing details |
+| PATCH | `/clothes/{clothing_id}` | Partial JSON metadata update; preserves image |
+| DELETE | `/clothes/{clothing_id}` | Delete own record and associated image |
+| GET | `/clothes/{clothing_id}/image` | Authenticated, owner-authorized image response |
+| GET | `/recommendations` | Own outfits; optional season and limit (default 3, range 1–20) |
 
-All clothing/recommendation routes require `Authorization: Bearer <access_token>`.
-Root and Swagger remain public. Missing/invalid/expired tokens return 401; another
-user's ID returns 403. Legacy rows with `owner_id=NULL` are hidden and return 404.
-Public `/uploads` serving is intentionally removed for privacy.
+POST accepts `name`, `category`, `color`, `season`/`seasons`, `style`,
+`fit`, `material`, `formality` and `image`. Repeat multipart `seasons`
+fields for multiple values. Responses return `seasons` as a JSON array and allow
+nullable legacy metadata. Formality outside 1–10 returns **422**.
 
-POST accepts name, category, color, season/seasons, style, fit, material,
-formality and image. Repeat the multipart `seasons` field for multiple values.
-Responses include nullable legacy metadata and a `seasons` array. List/create
-envelopes remain `{clothes: [...]}` and `{message: ..., clothing: {...}}`.
-PATCH returns the clothing object directly.
+List/create responses use `{ "clothes": [...] }` and
+`{ "message": "...", "clothing": {...} }`. PATCH returns the clothing object:
 
 ```json
-{"style":"smart_casual","formality":6,"seasons":["spring","summer"]}
+{"style": "smart_casual", "formality": 6, "seasons": ["spring", "summer"]}
 ```
 
-PATCH preserves omitted fields and `image_path`. Updating seasons synchronizes
-legacy season to the first value. Formality outside 1–10 returns 422; missing IDs
-return 404. Swagger: <http://127.0.0.1:8001/docs>.
+Recommendations: `GET /recommendations?season=winter&limit=3`.
+Use Swagger's **Authorize** control with your own access token for protected routes.
 
-## 8. Local Development
+## Local Development
 
-Python 3.13 and Node 24 are the tested runtimes. Reuse an existing virtual environment
-if available; activation is not required on Windows. For a new checkout:
+Prerequisites: Python 3.13, Node.js 24, pnpm 11.19 and a Supabase project for Auth.
+Production credentials are not needed to run the automated tests.
+
+**Backend (Windows PowerShell):**
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8001
 ```
 
-In this checkout the existing interpreter is `..\.venv\Scripts\python.exe`.
-With an active environment, the equivalent start command is
-`python -m uvicorn app.main:app --reload --port 8001`. In another terminal:
+Export your own backend environment settings before starting the server.
+The backend does **not** automatically load `.env` files. SQLite and local images
+are the development defaults, but login still requires `SUPABASE_URL` and the
+server-only `SUPABASE_SECRET_KEY`. There is no authentication bypass.
+An existing virtual environment can be used directly without activating it.
+
+**Frontend (separate terminal):**
 
 ```sh
 cd frontend
-npm install
-npm run dev
+# Copy .env.example to .env.local and configure your own public Auth settings.
+pnpm install --frozen-lockfile
+pnpm dev
 ```
 
-Frontend: <http://127.0.0.1:5173>. Backend: <http://127.0.0.1:8001>.
-For lockfile-based installation, use `pnpm install --frozen-lockfile` instead.
-Copy `frontend/.env.example` to an ignored `frontend/.env.local` and set
-`VITE_API_BASE_URL`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_PUBLISHABLE_KEY`
-(public build-time settings). Use the publishable `sb_publishable_...` key only.
-Backend `.env.example` documents `FRONTEND_ORIGINS` and `WARDROBE_DATA_DIR`;
-export these in the shell/hosting dashboard (backend does not auto-load .env files).
-SQLite/local uploads remain the development persistence defaults, but real login
-requires Supabase Auth: configure server-only `SUPABASE_URL` and
-`SUPABASE_SECRET_KEY` even with `IMAGE_STORAGE=local`. No development auth bypass
-is included. Add `http://127.0.0.1:5173/` to Supabase Auth redirect URLs.
-The database stores `uploads/<owner>/<uuid>.<ext>` locally or `<owner>/<uuid>.<ext>`
-in Supabase mode. API `image_path` is `clothes/<id>/image`, not a public storage URL;
-the React client fetches it with a token and revokes its Blob URL when unmounted.
+The committed pnpm lockfile provides reproducible frontend installation.
+`npm install` / `npm run dev` are also supported if npm is preferred.
 
-### Deployment
+Frontend: [127.0.0.1:5173](http://127.0.0.1:5173).
+Backend: [127.0.0.1:8001](http://127.0.0.1:8001).
+Configure the frontend origin and confirmation redirect URL in Supabase Auth.
+See [authentication setup](docs/authentication.md) for the complete account flow.
 
-`render.yaml` supplies the backend migration/start/build/health configuration;
-`netlify.toml` supplies the frontend build/publish configuration and production
-API/Auth config guard. Set the real HTTPS API URL, frontend CORS origin and
-Supabase publishable key before deploying. **Before the auth cutover**, run
-[the repeatable RLS/ownership SQL](docs/supabase-multi-user.sql), make the bucket
-private and configure Auth redirect URLs. Deployment fails closed if production
-privacy guards are missing. See [auth setup/cutover](docs/authentication.md) and
-[persistence configuration](docs/deployment.md).
+## Environment Variables
 
-Local DB/uploads are deliberately excluded from Git. A fresh cloud deployment is
-empty. Production requires PostgreSQL + Supabase Storage; missing settings cause an
-explicit startup error, never fallback to ephemeral local storage. Backups are still
-necessary. The six local records/photos are not automatically transferred or
-claimed by the next person who logs in. Existing unowned rows/photos are retained;
-any administrative ownership assignment and legacy image relocation needs a
-separate, backed-up, explicit migration.
+Safe templates: [backend .env.example](.env.example) and
+[frontend .env.example](frontend/.env.example). Never commit populated environment files.
 
-## 9. Testing
+| Backend variable | Purpose |
+| --- | --- |
+| `APP_ENV` | `development` locally; `production` on Render |
+| `DATABASE_URL` | Production PostgreSQL URI; secret. Empty uses SQLite only in development |
+| `IMAGE_STORAGE` | `local` for development; `supabase` in production |
+| `SUPABASE_URL` | Supabase HTTPS project origin |
+| `SUPABASE_SECRET_KEY` | Server-only secret key; never a frontend variable |
+| `SUPABASE_STORAGE_BUCKET` | Private bucket name, default `clothing-images` |
+| `FRONTEND_ORIGINS` | Comma-separated exact frontend origins for CORS |
+| `WARDROBE_DATA_DIR` | Optional local SQLite/uploads directory |
+
+The legacy `SUPABASE_SERVICE_ROLE_KEY` is an alternative when
+`SUPABASE_SECRET_KEY` is unset. Use the Supabase **Session pooler** URI on port 5432
+with `sslmode=require`; percent-encode reserved characters in its password.
+
+| Frontend build-time variable | Purpose |
+| --- | --- |
+| `VITE_API_BASE_URL` | Backend origin, without `/docs` or another path |
+| `VITE_SUPABASE_URL` | Supabase HTTPS project origin |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | Public publishable key; never a secret/service-role key |
+
+Changing a `VITE_*` value requires rebuilding the frontend.
+
+## Testing
+
+From the project root:
 
 ```powershell
-..\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-..\.venv\Scripts\python.exe -m tests
-# Optional local live smoke, with your own valid token in WARDROBE_TEST_ACCESS_TOKEN:
-..\.venv\Scripts\python.exe tests/smoke_live.py
+.\.venv\Scripts\python.exe -m tests
 ```
+
+The isolated runner clears persistence credentials and uses temporary SQLite/files.
+Tests cover real FastAPI routes, CRUD/PATCH, serialization, migrations, PostgreSQL
+configuration, Auth/Storage adapters, two-user isolation and safe failure handling.
+Supabase HTTP is mocked; local tests do not claim to validate a live cloud database.
 
 ```sh
 cd frontend
-npm test
-npm run build
+pnpm test
+pnpm exec tsc -b
+pnpm build
 ```
 
-The test runner isolates all unittest tests in disposable storage, even if cloud
-credentials exist in the shell. Persistence tests exercise CRUD/PATCH/recommendation
-responses with mocked Supabase HTTP plus PostgreSQL config/DDL; live cloud setup
-and redeploy checks remain manual. Two-user security tests exercise real routes and
-the actual token-verification function against a mock Auth API, covering foreign
-CRUD/photo IDs, forged ownership, legacy data, filtered lists and recommendations.
-Frontend tests cover session restoration, email confirmation, login/logout,
-refresh/401 handling, protected UI and account-switch races.
-PATCH tests use in-memory SQLite; deployment tests use temporary storage.
-Live smoke creates/cleans temporary records/photos and compares persistent rows,
-schema and image hashes. UI verification covers add/edit/delete, recommendations,
-loading/error/retry, and 390/768/1024/1440px layouts.
+Frontend tests cover API services, multipart uploads, optional jackets, Auth UI,
+registration, login/logout, refresh, 401 handling and account-switch races.
 
-## 10. Roadmap
+GitHub Actions runs these checks on pushes and pull requests with read-only
+repository permissions and no production secrets. Its build uses inert public
+placeholders and is not a deployment. Live isolation and persistence across Render
+redeploys have also been verified separately with disposable accounts and images.
 
-- More precise per-piece explanations and recommendation diversity.
-- Upload size/content hardening and repeatable browser accessibility tests.
-- Pagination and scalable combination ranking for larger wardrobes.
-- Automated live multi-user/redeploy QA, backups and versioned schema migrations.
-- Rate limiting, stronger upload validation and operational observability.
+## Deployment
 
-This is a portfolio application with application-level user isolation, not a
-substitute for production monitoring, recovery procedures or an independent audit.
+- **Render:** `render.yaml` defines the backend build, explicit migration/start
+  sequence and root health check.
+- **Netlify:** `netlify.toml` builds from `frontend/`, publishes `dist/`, validates
+  public production settings and rewrites SPA routes to `index.html`.
+- **Supabase:** PostgreSQL, Auth and a private `clothing-images` bucket.
+
+Backend start command:
+
+```sh
+python -m app.migrate && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+```
+
+Missing production database/storage/privacy settings fail startup; there is no
+fallback to ephemeral SQLite or local uploads. The bounded database preflight and
+additive migration preserve existing rows. PostgreSQL and Storage survive backend
+redeploys; backups and service availability still require operational care.
+
+For a new deployment, follow [deployment configuration](docs/deployment.md) and
+[Auth/private storage setup](docs/authentication.md). Existing production users
+and local legacy data are not reset or automatically imported.
+
+## Security
+
+- Backend access-token verification and server-side ownership enforcement protect
+  every clothing, recommendation and private-image operation.
+- Users cannot read, edit or delete another user's wardrobe through these routes.
+- UUID owner-scoped storage paths and a private bucket prevent public image access.
+- Restrictive RLS guards provide an additional client-side access boundary;
+  trusted backend database/storage credentials can bypass RLS, so API authorization
+  remains mandatory.
+- Secret/service-role keys and database credentials stay on the backend in environment
+  variables. Only the publishable Auth key is bundled into the frontend.
+- Protected responses use `Cache-Control: private, no-store`.
+  Exact-origin CORS complements, but does not replace, authentication.
+- Credential-safe connection diagnostics avoid exposing DSNs, passwords and tokens.
+
+This portfolio application is not an independent security audit. Upload
+content/size hardening, rate limiting, monitoring and recovery procedures remain
+important production improvements.
+
+## Screenshots
+
+Production screenshots will be added here.
+
+Assets will be placed in [docs/screenshots/](docs/screenshots/README.md).
+Historical local screenshots are retained there but are not presented as final
+production screenshots.
+
+## Future Improvements
+
+- Stronger upload content/size validation and account-data deletion workflows.
+- Pagination and more scalable outfit ranking for larger wardrobes.
+- Recommendation diversity and more detailed per-piece explanations.
+- Repeatable browser/accessibility tests and automated live persistence QA.
+- Versioned migrations, database/image backups and storage reconciliation.
+- Rate limiting and operational monitoring.
