@@ -15,7 +15,7 @@ from urllib.request import urlopen
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.testclient import TestClient
+from tests.auth_support import TestClient
 
 from app.config import PROJECT_ROOT, data_directory, frontend_origins
 
@@ -41,7 +41,7 @@ class DeploymentTests(unittest.TestCase):
                            allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
         with TestClient(app) as client:
             headers = {"Origin": "https://demo.netlify.app", "Access-Control-Request-Method": "PATCH",
-                       "Access-Control-Request-Headers": "content-type"}
+                       "Access-Control-Request-Headers": "content-type,authorization"}
             response = client.options("/clothes/1", headers=headers)
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.headers["access-control-allow-origin"], headers["Origin"])
@@ -53,7 +53,7 @@ class DeploymentTests(unittest.TestCase):
         code = '''
 import json
 from pathlib import Path
-from fastapi.testclient import TestClient
+from tests.auth_support import TestClient
 from app.main import app
 from app.database import DATABASE_PATH
 from app.config import UPLOADS_DIR
@@ -129,7 +129,10 @@ print(json.dumps({"startup":"PASS","shared_storage":"PASS","CORS":"PASS"}))
         for url, success in (("", False), ("http://127.0.0.1:8001", False),
                              ("https://wardrobe-api.example", True)):
             with self.subTest(url=url):
-                result = subprocess.run(guard, env={**os.environ, "VITE_API_BASE_URL": url},
+                result = subprocess.run(guard, cwd=PROJECT_ROOT / "frontend",
+                                        env={**os.environ, "VITE_API_BASE_URL": url,
+                                             "VITE_SUPABASE_URL": "https://project.supabase.co",
+                                             "VITE_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_TEST_ONLY"},
                                         capture_output=True, timeout=10)
                 self.assertEqual(result.returncode == 0, success)
 

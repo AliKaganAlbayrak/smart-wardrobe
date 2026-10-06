@@ -3,10 +3,18 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import ts from "typescript";
 
+globalThis.__wardrobeApiAuth = {
+  accessToken: async () => "TEST-access-token",
+  getSnapshot: () => ({ session: { user: { id: "test-user-a" } } }),
+  refreshAccessToken: async () => "TEST-renewed-token",
+  expire: async () => {},
+};
+
 // Exercise the real TypeScript modules using the compiler already in devDependencies.
 async function loadModule(path, apiBase = "http://127.0.0.1:8001") {
   const source = (await readFile(new URL(path, import.meta.url), "utf8"))
-    .replace("import.meta.env.VITE_API_BASE_URL", JSON.stringify(apiBase));
+    .replace("import.meta.env.VITE_API_BASE_URL", JSON.stringify(apiBase))
+    .replace('import { authStore } from "./auth";', 'const authStore = globalThis.__wardrobeApiAuth;');
   const output = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
   }).outputText;
@@ -31,7 +39,8 @@ test("PATCH client sends only explicit fields as JSON", async (t) => {
   t.mock.method(globalThis, "fetch", async (url, init) => {
     assert.equal(url, "http://127.0.0.1:8001/clothes/7");
     assert.equal(init.method, "PATCH");
-    assert.equal(init.headers["Content-Type"], "application/json");
+    assert.equal(init.headers["content-type"], "application/json");
+    assert.equal(init.headers.authorization, "Bearer TEST-access-token");
     assert.deepEqual(JSON.parse(init.body), patch);
     return new Response(JSON.stringify({ id: 7, ...patch }));
   });

@@ -2,21 +2,25 @@
 
 ## 1. Project Overview
 
-A single-user wardrobe demo with photo-based clothing management and deterministic,
-explainable outfit recommendations. A modular FastAPI API powers a responsive React
-dashboard. No ML, external weather service or authentication is required.
+A multi-user wardrobe application with private photo-based clothing management and
+deterministic, explainable outfit recommendations. A modular FastAPI API powers a
+responsive React dashboard; Supabase Auth provides email/password accounts.
+No ML or external weather service is required.
 
 ## 2. Features
 
 - Clothing CRUD and partial editing via PATCH; metadata and multiple seasons.
-- Multipart image uploads with UUID filenames; local static serving or Supabase Storage.
+- Email/password registration, email confirmation, login/logout and persistent sessions.
+- Verified-token authorization and UUID ownership for CRUD, filters and recommendations.
+- Multipart image uploads with UUID filenames; owner folders and authenticated downloads.
 - Category, color, season and frontend style filters.
 - Ranked outfits with color, season, style and formality scores and explanations.
 - Responsive cards, edit/confirmation dialogs, image preview, loading/error/retry states.
 
 ## 3. Screenshots
 
-Actual local application, using the six existing wardrobe items.
+Historical local UI screenshots, using the six original wardrobe items. The current
+version adds login/registration; unowned legacy data is preserved but hidden.
 
 ### Wardrobe
 
@@ -34,14 +38,14 @@ Actual local application, using the six existing wardrobe items.
 
 ```text
 app/
-  main.py, config.py, database.py, models.py, schemas.py
+  main.py, auth.py, config.py, database.py, models.py, schemas.py
   routers/     clothes.py, recommendations.py
   services/    clothing_service.py, image_service.py, storage.py, recommendation.py
   migrate.py   explicit production schema bootstrap/additive migrations
 frontend/src/
   components/  reusable forms, cards, dialogs and feedback
-  pages/       wardrobe, add clothing, recommendations
-  services/    API client and display labels
+  pages/       login/register, wardrobe, add clothing, recommendations
+  services/    Supabase client, session store, authenticated API client, labels
   types/, styles/
 tests/         backend unit and live API smoke tests
 docs/          screenshots, quality audit and deployment runbook
@@ -51,11 +55,16 @@ Routers handle HTTP; services handle storage/business logic. The recommendation
 service works on supplied objects without database access. Local SQLite and uploads
 share a configurable data directory; defaults remain at the project root. Production
 uses PostgreSQL via `DATABASE_URL` and Supabase Storage, independent of Render's disk.
+Every protected request verifies its bearer access token with the Supabase Auth API;
+the backend never trusts a supplied user ID. Clothing queries are scoped to the
+verified UUID. A private bucket and restrictive RLS guards prevent direct client
+bypasses. Photos are fetched through an owner-authorized backend endpoint.
 
 ## 5. Tech Stack
 
 Backend: Python, FastAPI, Pydantic, SQLAlchemy 2, SQLite/PostgreSQL (psycopg), Uvicorn,
-python-multipart and httpx (Supabase Storage REST). Frontend: React, TypeScript, Vite and plain CSS. Tests: Python
+python-multipart and httpx (Supabase Auth/Storage REST). Frontend: React, TypeScript,
+Vite, Supabase JS and plain CSS. Tests: Python
 unittest, FastAPI TestClient and Node's built-in test runner.
 
 ## 6. Recommendation Engine
@@ -104,7 +113,12 @@ of a summer bottom and cross-request repetition. Fit/material do not affect scor
 | PATCH | `/clothes/{id}` | JSON partial metadata update |
 | DELETE | `/clothes/{id}` | Delete record and associated image |
 | GET | `/recommendations` | Ranked outfits; season/limit queries |
-| GET | `/uploads/{filename}` | Local-mode static uploaded image |
+| GET | `/clothes/{id}/image` | Owner-authorized photo download |
+
+All clothing/recommendation routes require `Authorization: Bearer <access_token>`.
+Root and Swagger remain public. Missing/invalid/expired tokens return 401; another
+user's ID returns 403. Legacy rows with `owner_id=NULL` are hidden and return 404.
+Public `/uploads` serving is intentionally removed for privacy.
 
 POST accepts name, category, color, season/seasons, style, fit, material,
 formality and image. Repeat the multipart `seasons` field for multiple values.
@@ -143,32 +157,44 @@ npm run dev
 
 Frontend: <http://127.0.0.1:5173>. Backend: <http://127.0.0.1:8001>.
 For lockfile-based installation, use `pnpm install --frozen-lockfile` instead.
-`frontend/.env.example` documents `VITE_API_BASE_URL` (public build-time setting).
+Copy `frontend/.env.example` to an ignored `frontend/.env.local` and set
+`VITE_API_BASE_URL`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_PUBLISHABLE_KEY`
+(public build-time settings). Use the publishable `sb_publishable_...` key only.
 Backend `.env.example` documents `FRONTEND_ORIGINS` and `WARDROBE_DATA_DIR`;
 export these in the shell/hosting dashboard (backend does not auto-load .env files).
-Local defaults require no cloud credentials. `image_path` is `uploads/<uuid>.<ext>`
-locally and a durable public HTTPS URL in Supabase mode; API envelopes are unchanged.
+SQLite/local uploads remain the development persistence defaults, but real login
+requires Supabase Auth: configure server-only `SUPABASE_URL` and
+`SUPABASE_SECRET_KEY` even with `IMAGE_STORAGE=local`. No development auth bypass
+is included. Add `http://127.0.0.1:5173/` to Supabase Auth redirect URLs.
+The database stores `uploads/<owner>/<uuid>.<ext>` locally or `<owner>/<uuid>.<ext>`
+in Supabase mode. API `image_path` is `clothes/<id>/image`, not a public storage URL;
+the React client fetches it with a token and revokes its Blob URL when unmounted.
 
 ### Deployment
 
 `render.yaml` supplies the backend migration/start/build/health configuration;
 `netlify.toml` supplies the frontend build/publish configuration and production
-URL check. Set the real HTTPS API URL and frontend CORS origin before deploying.
-Supabase must be configured manually before deploying these changes. No external
-account or data migration was performed. See [setup, secrets and persistence limits](docs/deployment.md).
+API/Auth config guard. Set the real HTTPS API URL, frontend CORS origin and
+Supabase publishable key before deploying. **Before the auth cutover**, run
+[the repeatable RLS/ownership SQL](docs/supabase-multi-user.sql), make the bucket
+private and configure Auth redirect URLs. Deployment fails closed if production
+privacy guards are missing. See [auth setup/cutover](docs/authentication.md) and
+[persistence configuration](docs/deployment.md).
 
 Local DB/uploads are deliberately excluded from Git. A fresh cloud deployment is
 empty. Production requires PostgreSQL + Supabase Storage; missing settings cause an
 explicit startup error, never fallback to ephemeral local storage. Backups are still
-necessary. The six local records/photos are not automatically transferred. Public CRUD has no authentication:
-publish disposable demo data only, not irreplaceable or private records.
+necessary. The six local records/photos are not automatically transferred or
+claimed by the next person who logs in. Existing unowned rows/photos are retained;
+any administrative ownership assignment and legacy image relocation needs a
+separate, backed-up, explicit migration.
 
 ## 9. Testing
 
 ```powershell
 ..\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 ..\.venv\Scripts\python.exe -m tests
-# With the local API running:
+# Optional local live smoke, with your own valid token in WARDROBE_TEST_ACCESS_TOKEN:
 ..\.venv\Scripts\python.exe tests/smoke_live.py
 ```
 
@@ -181,7 +207,12 @@ npm run build
 The test runner isolates all unittest tests in disposable storage, even if cloud
 credentials exist in the shell. Persistence tests exercise CRUD/PATCH/recommendation
 responses with mocked Supabase HTTP plus PostgreSQL config/DDL; live cloud setup
-and redeploy checks remain manual. PATCH tests use in-memory SQLite; deployment tests use temporary storage.
+and redeploy checks remain manual. Two-user security tests exercise real routes and
+the actual token-verification function against a mock Auth API, covering foreign
+CRUD/photo IDs, forged ownership, legacy data, filtered lists and recommendations.
+Frontend tests cover session restoration, email confirmation, login/logout,
+refresh/401 handling, protected UI and account-switch races.
+PATCH tests use in-memory SQLite; deployment tests use temporary storage.
 Live smoke creates/cleans temporary records/photos and compares persistent rows,
 schema and image hashes. UI verification covers add/edit/delete, recommendations,
 loading/error/retry, and 390/768/1024/1440px layouts.
@@ -191,7 +222,8 @@ loading/error/retry, and 390/768/1024/1440px layouts.
 - More precise per-piece explanations and recommendation diversity.
 - Upload size/content hardening and repeatable browser accessibility tests.
 - Pagination and scalable combination ranking for larger wardrobes.
-- Cloud persistence integration/redeploy verification, backups and access controls
-  before multi-user production use.
+- Automated live multi-user/redeploy QA, backups and versioned schema migrations.
+- Rate limiting, stronger upload validation and operational observability.
 
-This is a portfolio product demo, not a hardened multi-user production service.
+This is a portfolio application with application-level user isolation, not a
+substitute for production monitoring, recovery procedures or an independent audit.

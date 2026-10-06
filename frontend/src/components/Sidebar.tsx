@@ -3,6 +3,9 @@ import type { PageName } from "../types";
 interface SidebarProps {
   activePage: PageName;
   onNavigate: (page: PageName) => void;
+  email: string;
+  loggingOut: boolean;
+  onLogout: () => void;
 }
 
 const navItems: Array<{ id: PageName; label: string; icon: string }> = [
@@ -11,7 +14,7 @@ const navItems: Array<{ id: PageName; label: string; icon: string }> = [
   { id: "recommendations", label: "Kombin Önerileri", icon: "✦" },
 ];
 
-export function Sidebar({ activePage, onNavigate }: SidebarProps) {
+export function Sidebar({ activePage, onNavigate, email, loggingOut, onLogout }: SidebarProps) {
   return (
     <aside className="sidebar">
       <button className="brand" onClick={() => onNavigate("wardrobe")}>
@@ -37,8 +40,8 @@ export function Sidebar({ activePage, onNavigate }: SidebarProps) {
       </nav>
 
       <div className="sidebar-footer">
-        <span className="status-dot" />
-        Kişisel stil arşivin
+        <span className="account-email" title={email}>{email}</span>
+        <button className="text-button" onClick={onLogout} disabled={loggingOut}>{loggingOut ? "Çıkış yapılıyor..." : "Çıkış Yap"}</button>
       </div>
     </aside>
   );

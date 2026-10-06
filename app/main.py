@@ -1,14 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from . import models  # noqa: F401 - registers ORM models with Base.metadata
-from .config import PERSISTENCE, UPLOADS_DIR, frontend_origins
+from .config import PERSISTENCE, frontend_origins
 from .database import initialize_database
 from .routers import clothes, recommendations
+from .services.storage import get_image_storage
 
 
 initialize_database()
+if PERSISTENCE.production:
+    get_image_storage().validate_private_bucket()
 
 app = FastAPI(
     title="Smart Wardrobe API",
@@ -24,12 +26,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-if PERSISTENCE.image_storage == "local":
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+# Images are served only after authorization, never through public StaticFiles.
 
 app.include_router(clothes.router)
 app.include_router(recommendations.router)
+
+
+@app.middleware("http")
+async def private_response_headers(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith(("/clothes", "/recommendations")):
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @app.get("/")

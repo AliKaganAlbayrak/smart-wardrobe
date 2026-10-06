@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from ..auth import CurrentUser, get_current_user
 
 from ..database import get_db
 from ..models import ClothingDB
@@ -26,13 +27,14 @@ def get_recommendations(
         description=f"Döndürülecek maksimum kombin sayısı (1-{MAX_RECOMMENDATION_LIMIT}).",
     ),
     db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
 ):
     try:
         normalized_season = validate_requested_season(season)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    clothes = db.query(ClothingDB).all()
+    clothes = db.query(ClothingDB).filter(ClothingDB.owner_id == user.id).all()
     recommendations = build_recommendations(
         clothes,
         season=normalized_season,

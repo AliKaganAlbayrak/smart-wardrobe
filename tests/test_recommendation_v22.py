@@ -2,7 +2,7 @@ import json
 import unittest
 from types import SimpleNamespace
 
-from fastapi.testclient import TestClient
+from tests.auth_support import TestClient, TEST_USER_ID
 
 from app.database import SessionLocal
 from app.main import app
@@ -79,9 +79,9 @@ class RecommendationEngineV22Tests(unittest.TestCase):
         created_ids = []
         with SessionLocal() as db:
             records = [
-                ClothingDB(name="v22-api-top", category="polo", color="siyah", season="summer", seasons=json.dumps(["summer"]), style="smart_casual", fit="regular", material="cotton", formality=5),
-                ClothingDB(name="v22-api-bottom", category="jeans", color="krem", season="summer", seasons=json.dumps(["summer"]), style="smart_casual", fit="regular", material="denim", formality=6),
-                ClothingDB(name="v22-api-shoes", category="shoes", color="black", season="all-season", seasons=json.dumps(["all-season"]), style="smart_casual", fit="regular", material="leather", formality=5),
+                ClothingDB(owner_id=TEST_USER_ID, name="v22-api-top", category="polo", color="siyah", season="summer", seasons=json.dumps(["summer"]), style="smart_casual", fit="regular", material="cotton", formality=5),
+                ClothingDB(owner_id=TEST_USER_ID, name="v22-api-bottom", category="jeans", color="krem", season="summer", seasons=json.dumps(["summer"]), style="smart_casual", fit="regular", material="denim", formality=6),
+                ClothingDB(owner_id=TEST_USER_ID, name="v22-api-shoes", category="shoes", color="black", season="all-season", seasons=json.dumps(["all-season"]), style="smart_casual", fit="regular", material="leather", formality=5),
             ]
             db.add_all(records)
             db.commit()

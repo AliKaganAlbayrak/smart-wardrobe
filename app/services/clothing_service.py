@@ -4,6 +4,7 @@ import logging
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from uuid import UUID
 
 from ..models import ClothingDB
 from ..schemas import ClothingUpdate
@@ -63,12 +64,15 @@ def serialize_clothing(item: ClothingDB) -> dict:
         "fit": item.fit,
         "material": item.material,
         "formality": item.formality,
-        "image_path": item.image_path,
+        # Never expose a public object URL. This route verifies ownership before
+        # serving the image, including local-development files.
+        "image_path": f"clothes/{item.id}/image" if item.image_path else None,
     }
 
 
 def create_clothing(
     db: Session,
+    owner_id: UUID,
     name: str,
     category: str,
     color: str,
@@ -82,6 +86,7 @@ def create_clothing(
 ) -> ClothingDB:
     normalized_seasons = normalize_seasons(season, seasons)
     new_item = ClothingDB(
+        owner_id=owner_id,
         name=name,
         category=category,
         color=color,
@@ -91,7 +96,7 @@ def create_clothing(
         fit=fit,
         material=material,
         formality=formality,
-        image_path=save_image(image),
+        image_path=save_image(image, owner_id),
     )
 
     try:
@@ -101,7 +106,7 @@ def create_clothing(
         db.rollback()
         # Storage and SQL cannot share a transaction; compensate failed inserts.
         try:
-            delete_image(new_item.image_path)
+            delete_image(new_item.image_path, owner_id)
         except Exception:
             logger.error("Image cleanup after failed clothing insert requires manual retry")
         raise
@@ -111,11 +116,12 @@ def create_clothing(
 
 def list_clothes(
     db: Session,
+    owner_id: UUID,
     category: str | None = None,
     color: str | None = None,
     season: str | None = None,
 ) -> list[ClothingDB]:
-    query = db.query(ClothingDB)
+    query = db.query(ClothingDB).filter(ClothingDB.owner_id == owner_id)
 
     if category:
         query = query.filter(ClothingDB.category == category)
@@ -133,27 +139,34 @@ def list_clothes(
     return query.all()
 
 
-def get_clothing(db: Session, clothing_id: int) -> ClothingDB:
-    clothing = db.query(ClothingDB).filter(ClothingDB.id == clothing_id).first()
+def get_clothing(db: Session, clothing_id: int, owner_id: UUID) -> ClothingDB:
+    clothing = db.query(ClothingDB).filter(
+        ClothingDB.id == clothing_id, ClothingDB.owner_id == owner_id,
+    ).first()
     if clothing is None:
+        # Existence-only check for the requested 403 contract; no foreign fields
+        # are serialized. Unowned legacy records stay indistinguishable from 404.
+        other_owner = db.query(ClothingDB.owner_id).filter(ClothingDB.id == clothing_id).scalar()
+        if other_owner is not None:
+            raise HTTPException(status_code=403, detail="Bu kıyafete erişim yetkiniz yok.")
         raise HTTPException(status_code=404, detail="Kıyafet bulunamadı")
     return clothing
 
 
-def delete_clothing(db: Session, clothing_id: int):
-    clothing = get_clothing(db, clothing_id)
+def delete_clothing(db: Session, clothing_id: int, owner_id: UUID):
+    clothing = get_clothing(db, clothing_id, owner_id)
     try:
         db.delete(clothing)
         db.flush()  # Detect SQL failures before removing the object.
-        delete_image(clothing.image_path)
+        delete_image(clothing.image_path, owner_id)
         db.commit()
     except Exception:
         db.rollback()  # A storage outage must not silently delete the DB record.
         raise
 
 
-def update_clothing(db: Session, clothing_id: int, update: ClothingUpdate) -> ClothingDB:
-    clothing = get_clothing(db, clothing_id)
+def update_clothing(db: Session, clothing_id: int, update: ClothingUpdate, owner_id: UUID) -> ClothingDB:
+    clothing = get_clothing(db, clothing_id, owner_id)
     values = update.model_dump(exclude_unset=True)
     if "seasons" in values:
         seasons = normalize_seasons(None, values.pop("seasons"))

@@ -1,6 +1,7 @@
 """Real HTTP smoke test; never edits pre-existing records or images."""
 import hashlib
 import json
+import os
 import sqlite3
 from pathlib import Path
 from urllib.error import HTTPError
@@ -15,13 +16,14 @@ def snapshot():
     with sqlite3.connect(f"file:{(ROOT / 'wardrobe.db').as_posix()}?mode=ro", uri=True) as db:
         rows = db.execute("SELECT * FROM clothes ORDER BY id").fetchall()
         schema = db.execute("PRAGMA table_info(clothes)").fetchall()
-    images = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
-              for p in (ROOT / "uploads").iterdir() if p.is_file()}
+    images = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
+              for p in (ROOT / "uploads").rglob("*") if p.is_file()}
     return rows, schema, images
 
 
 def request(path, method="GET", data=None, content_type=None):
-    headers = {}
+    token = os.getenv("WARDROBE_TEST_ACCESS_TOKEN", "")
+    headers = {"Authorization": "Bearer " + token} if token else {}
     if isinstance(data, dict):
         data = json.dumps(data).encode()
         content_type = "application/json"
@@ -39,6 +41,8 @@ def request(path, method="GET", data=None, content_type=None):
 
 
 def run():
+    if not os.getenv("WARDROBE_TEST_ACCESS_TOKEN"):
+        raise SystemExit("Authenticated smoke requires WARDROBE_TEST_ACCESS_TOKEN in your local shell; never print or commit it.")
     before = snapshot()
     marker = f"demo-smoke-{uuid4()}"
     temporary_ids = []
@@ -50,7 +54,7 @@ def run():
             assert status == 200, (path, status)
             results[path] = status
         _, original = request("/clothes")
-        assert len(original["clothes"]) == len(before[0])
+        original_ids = {item["id"] for item in original["clothes"]}
         for item in original["clothes"]:
             assert request(f"/clothes/{item['id']}")[0] == 200
             if item["image_path"]:
@@ -89,12 +93,12 @@ def run():
         results["filters + validation"] = "PASS"
         for season in ("summer", "winter"):
             status, recommendations = request(f"/recommendations?season={season}&limit=3")
-            assert status == 200 and 0 < len(recommendations["recommendations"]) <= 3
+            assert status == 200 and len(recommendations["recommendations"]) <= 3
             assert all(isinstance(r["top"]["seasons"], list) for r in recommendations["recommendations"])
         results["recommendations"] = "PASS"
         assert request(path, "DELETE")[0] == 200
         temporary_ids.remove(created["id"])
-        assert request(path)[0] == 404 and not (ROOT / image_path).exists()
+        assert request(path)[0] == 404 and request("/" + image_path)[0] == 404
         results["DELETE + image cleanup"] = "PASS"
     finally:
         # A failed POST can still have committed a record: locate only our unique marker.
@@ -105,6 +109,7 @@ def run():
             request(f"/clothes/{item_id}", "DELETE")
         after = snapshot()
         assert after == before, "Permanent rows, schema or images changed"
+        assert {item["id"] for item in request("/clothes")[1]["clothes"]} == original_ids
     results["permanent rows before/after"] = [len(before[0]), len(after[0])]
     results["permanent photos + schema"] = "UNCHANGED"
     print(json.dumps(results, ensure_ascii=True, indent=2))

@@ -3,7 +3,7 @@ import json
 import unittest
 from types import SimpleNamespace
 
-from fastapi.testclient import TestClient
+from tests.auth_support import TestClient, TEST_USER_ID
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -215,7 +215,7 @@ class RecommendationSeasonEndpointTests(unittest.TestCase):
                 values = vars(item).copy()
                 if isinstance(values["seasons"], list):
                     values["seasons"] = json.dumps(values["seasons"])
-                db.add(ClothingDB(**values))
+                db.add(ClothingDB(owner_id=TEST_USER_ID, **values))
             db.commit()
 
     def test_winter_endpoint_serializes_nullable_jacket_and_multi_seasons(self):

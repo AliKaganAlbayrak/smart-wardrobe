@@ -1,65 +1,53 @@
-from io import BytesIO
+"""Original CRUD smoke flow, now isolated and authenticated; no permanent data."""
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
 
-from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-from app.database import SessionLocal
+from app.database import Base, get_db
 from app.main import app
 from app.models import ClothingDB
+from app.services.storage import LocalImageStorage
+from tests.auth_support import TestClient
 
 
-client = TestClient(app)
-
-
-def _count_clothes() -> int:
-    db = SessionLocal()
-    try:
-        return db.query(ClothingDB).count()
-    finally:
-        db.close()
-
-
-def test_api_smoke_and_metadata_cleanup():
-    initial_count = _count_clothes()
-
-    assert client.get("/").status_code == 200
-    assert client.get("/clothes").status_code == 200
-    assert client.get("/clothes/1").status_code == 200
-
-    valid_payload = {
-        "name": "Pytest Smoke Shirt",
-        "category": "shirt",
-        "color": "navy",
-        "seasons": ["spring", "summer"],
-        "style": "smart_casual",
-        "fit": "regular",
-        "material": "cotton",
-        "formality": "5",
-    }
-    response = client.post("/clothes", data=valid_payload)
-    assert response.status_code in {200, 201}
-    created = response.json()["clothing"]
-    assert isinstance(created["seasons"], list)
-    assert created["seasons"] == ["spring", "summer"]
-
-    assert client.get(f"/clothes/{created['id']}").status_code == 200
-    assert client.post(
-        "/clothes",
-        data={**valid_payload, "name": "Pytest Invalid Low", "formality": "0"},
-    ).status_code == 422
-    assert client.post(
-        "/clothes",
-        data={**valid_payload, "name": "Pytest Invalid High", "formality": "11"},
-    ).status_code == 422
-
-    image_response = client.post(
-        "/clothes",
-        data={**valid_payload, "name": "Pytest Image"},
-        files={"image": ("pytest.jpg", BytesIO(b"test-image"), "image/jpeg")},
-    )
-    assert image_response.status_code in {200, 201}
-    image_item = image_response.json()["clothing"]
-    assert image_item["image_path"].startswith("uploads/")
-
-    assert client.delete(f"/clothes/{created['id']}").status_code == 200
-    assert client.delete(f"/clothes/{image_item['id']}").status_code == 200
-    assert _count_clothes() == initial_count
+class APISmokeTests(unittest.TestCase):
+    def test_api_smoke_and_metadata_cleanup(self):
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        self.addCleanup(engine.dispose)
+        Base.metadata.create_all(engine)
+        sessions = sessionmaker(bind=engine)
+        previous = app.dependency_overrides.copy()
+        self.addCleanup(lambda: (app.dependency_overrides.clear(), app.dependency_overrides.update(previous)))
+        def db_dependency():
+            with sessions() as db: yield db
+        app.dependency_overrides[get_db] = db_dependency
+        payload = dict(name="TEST Smoke Shirt", category="shirt", color="navy", seasons=["spring", "summer"],
+                       style="smart_casual", fit="regular", material="cotton", formality="5")
+        with tempfile.TemporaryDirectory() as directory:
+            storage = LocalImageStorage(Path(directory) / "uploads")
+            with patch("app.services.image_service.get_image_storage", return_value=storage), \
+                 patch("app.routers.clothes.get_image_storage", return_value=storage), TestClient(app) as client:
+                self.assertEqual(client.get("/").status_code, 200)
+                self.assertEqual(client.get("/clothes").json(), {"clothes": []})
+                ids = []
+                try:
+                    for image in (False, True):
+                        response = client.post("/clothes", data=payload,
+                            files={"image": ("test.jpg", b"test-image", "image/jpeg")} if image else None)
+                        self.assertIn(response.status_code, (200, 201))
+                        item = response.json()["clothing"]; ids.append(item["id"])
+                        self.assertEqual(item["seasons"], ["spring", "summer"])
+                        self.assertEqual(client.get(f"/clothes/{item['id']}").status_code, 200)
+                        if image:
+                            self.assertEqual(client.get("/" + item["image_path"]).content, b"test-image")
+                    for invalid in (0, 11):
+                        self.assertEqual(client.post("/clothes", data={**payload, "formality": str(invalid)}).status_code, 422)
+                finally:
+                    for item_id in ids: self.assertEqual(client.delete(f"/clothes/{item_id}").status_code, 200)
+                with sessions() as db: self.assertEqual(db.query(ClothingDB).count(), 0)
+                self.assertFalse(list(storage.directory.rglob("*")))

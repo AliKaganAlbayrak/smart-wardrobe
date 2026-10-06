@@ -46,6 +46,7 @@ def _migrate_metadata(connection):
     column_names = {column["name"] for column in inspect(connection).get_columns("clothes")}
 
     missing_columns = {
+        "owner_id": "UUID" if connection.dialect.name == "postgresql" else "CHAR(32)",
         "image_path": "VARCHAR(255)",
         "style": "VARCHAR(50)",
         "fit": "VARCHAR(50)",
@@ -62,6 +63,8 @@ def _migrate_metadata(connection):
                     f"{column_name} {column_type}"
                 )
             )
+
+    connection.execute(text("CREATE INDEX IF NOT EXISTS ix_clothes_owner_id ON clothes (owner_id)"))
 
     rows = connection.execute(
         text("SELECT id, season, seasons FROM clothes WHERE seasons IS NULL")
@@ -102,6 +105,24 @@ def apply_schema_migrations(target_engine=None):
             # Supabase's Data API must not expose these tables to anon clients.
             # SQLAlchemy connects as the table owner; it bypasses RLS as before.
             connection.execute(text("ALTER TABLE clothes ENABLE ROW LEVEL SECURITY"))
+            if PERSISTENCE.production:
+                validate_ownership_policies(connection)
+
+
+def validate_ownership_policies(connection):
+    rows = connection.execute(text(
+        "SELECT p.schemaname, p.tablename, p.policyname, p.permissive, p.roles, p.cmd, c.relrowsecurity "
+        "FROM pg_policies p JOIN pg_namespace n ON n.nspname = p.schemaname "
+        "JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = p.tablename "
+        "WHERE p.policyname IN ('smart_wardrobe_owner_guard_v1', 'smart_wardrobe_storage_guard_v1')"
+    )).mappings().all()
+    policies = {(row["schemaname"], row["tablename"], row["policyname"]): row for row in rows}
+    for expected in (("public", "clothes", "smart_wardrobe_owner_guard_v1"),
+                     ("storage", "objects", "smart_wardrobe_storage_guard_v1")):
+        row = policies.get(expected)
+        if (row is None or row["permissive"] != "RESTRICTIVE" or row["cmd"] != "ALL"
+                or not row["relrowsecurity"] or not {"anon", "authenticated"}.issubset(set(row["roles"]))):
+            raise RuntimeError("Multi-user RLS guards are missing. Run docs/supabase-multi-user.sql in the Supabase SQL Editor before deployment.")
 
 
 def validate_database_schema(target_engine=None):
@@ -114,6 +135,9 @@ def validate_database_schema(target_engine=None):
     if missing:
         raise RuntimeError("Database schema is outdated (" + ", ".join(sorted(missing))
                            + "); run: python -m app.migrate")
+    if target_engine.dialect.name == "postgresql" and PERSISTENCE.production:
+        with target_engine.connect() as connection:
+            validate_ownership_policies(connection)
 
 
 def initialize_database():

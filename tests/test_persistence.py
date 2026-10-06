@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 import httpx
 from fastapi import HTTPException, UploadFile
-from fastapi.testclient import TestClient
+from tests.auth_support import TestClient, TEST_USER_ID
 from sqlalchemy import create_engine, create_mock_engine, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import SQLAlchemyError
@@ -182,21 +182,20 @@ class StorageAdapterTests(unittest.TestCase):
 
         storage = self.remote(handler)
         with patch("app.services.image_service.get_image_storage", return_value=storage):
-            result = save_image(self.image())
-        self.assertTrue(result.startswith(SUPABASE_URL + "/storage/v1/object/public/clothing-images/clothes/"))
+            result = save_image(self.image(), TEST_USER_ID)
+        self.assertTrue(result.startswith(str(TEST_USER_ID) + "/"))
         self.assertTrue(result.endswith(".jpeg"))
         UUID(Path(result).stem)
         self.assertEqual(requests[0].method, "POST")
-        self.assertEqual(requests[0].url.path, "/storage/v1/object/clothing-images/clothes/" + Path(result).name)
+        self.assertEqual(requests[0].url.path, "/storage/v1/object/clothing-images/" + result)
         self.assertNotIn(FAKE_SECRET, result)
 
     def test_delete_exact_owned_object_and_missing_object_is_idempotent(self):
         requests = []
         storage = self.remote(lambda request: requests.append(request) or httpx.Response(200, json=[]))
-        object_key = f"clothes/{uuid4()}.jpeg"
-        url = storage.public_prefix + object_key
-        storage.delete(url)
-        storage.delete(url)
+        object_key = f"{TEST_USER_ID}/{uuid4()}.jpeg"
+        storage.delete(object_key, TEST_USER_ID)
+        storage.delete(object_key, TEST_USER_ID)
         for request in requests:
             self.assertEqual(request.method, "DELETE")
             self.assertEqual(request.url.path, "/storage/v1/object/clothing-images")
@@ -209,7 +208,7 @@ class StorageAdapterTests(unittest.TestCase):
                      storage.public_prefix + "clothes/", storage.public_prefix + "clothes/../secret.jpeg",
                      storage.public_prefix + "clothes/not-owned.jpeg",
                      storage.public_prefix + f"clothes/{uuid4()}.jpeg?token=secret"):
-            storage.delete(path)
+            storage.delete(path, TEST_USER_ID)
 
     def test_legacy_key_uses_bearer_only_on_expected_project(self):
         def handler(request):
@@ -217,7 +216,7 @@ class StorageAdapterTests(unittest.TestCase):
             self.assertEqual(request.url.host, "project-test.supabase.co")
             return httpx.Response(200, json={})
 
-        self.remote(handler, "test-legacy-jwt").save(self.image(), f"{uuid4()}.jpeg")
+        self.remote(handler, "test-legacy-jwt").save(self.image(), f"{uuid4()}.jpeg", TEST_USER_ID)
 
     def test_storage_errors_and_redirects_are_safe_no_fallback(self):
         for status in (301, 400, 401, 403, 404, 500):
@@ -225,7 +224,7 @@ class StorageAdapterTests(unittest.TestCase):
                 storage = self.remote(lambda request: httpx.Response(
                     status, json={"message": FAKE_SECRET}, headers={"location": "https://attacker.example"}))
                 with self.assertRaises(HTTPException) as error:
-                    storage.save(self.image(), f"{uuid4()}.jpeg")
+                    storage.save(self.image(), f"{uuid4()}.jpeg", TEST_USER_ID)
                 self.assertEqual(error.exception.status_code, 502)
                 self.assertNotIn(FAKE_SECRET, error.exception.detail)
 
@@ -234,60 +233,59 @@ class StorageAdapterTests(unittest.TestCase):
             raise httpx.ConnectTimeout(FAKE_SECRET, request=request)
 
         with self.assertRaises(HTTPException) as error:
-            self.remote(handler).save(self.image(), f"{uuid4()}.jpeg")
+            self.remote(handler).save(self.image(), f"{uuid4()}.jpeg", TEST_USER_ID)
         self.assertEqual(error.exception.status_code, 502)
         self.assertNotIn(FAKE_SECRET, error.exception.detail)
 
     def test_missing_object_vs_missing_bucket(self):
         storage = self.remote(lambda request: httpx.Response(404, json={"code": "NoSuchKey"}))
-        storage.delete(storage.public_prefix + f"clothes/{uuid4()}.jpeg")
+        storage.delete(f"{TEST_USER_ID}/{uuid4()}.jpeg", TEST_USER_ID)
         storage = self.remote(lambda request: httpx.Response(404, json={"code": "NoSuchBucket"}))
         with self.assertRaises(HTTPException):
-            storage.delete(storage.public_prefix + f"clothes/{uuid4()}.jpeg")
+            storage.delete(f"{TEST_USER_ID}/{uuid4()}.jpeg", TEST_USER_ID)
 
     def test_local_fallback_and_delete_scope(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             storage = LocalImageStorage(root / "uploads")
             with patch("app.services.image_service.get_image_storage", return_value=storage):
-                path = save_image(self.image())
+                path = save_image(self.image(), TEST_USER_ID)
                 self.assertEqual((root / path).read_bytes(), b"image-content")
                 outside = root / "keep.jpeg"
                 outside.write_bytes(b"outside")
                 for invalid in ("uploads/../keep.jpeg", "uploads/..\\keep.jpeg",
                                 "https://other.example/" + Path(path).name, "C:\\keep.jpeg"):
-                    delete_image(invalid)
+                    delete_image(invalid, TEST_USER_ID)
                 self.assertTrue((root / path).is_file())
                 self.assertTrue(outside.is_file())
-                delete_image(path)
-                delete_image(path)
+                delete_image(path, TEST_USER_ID)
+                delete_image(path, TEST_USER_ID)
                 self.assertFalse((root / path).exists())
 
     def test_invalid_mime_and_extension_do_not_upload(self):
         with patch("app.services.image_service.get_image_storage") as factory:
             for image in (self.image(mime="text/plain"), self.image(filename="test.invalid-extension")):
                 with self.assertRaises(HTTPException) as error:
-                    save_image(image)
+                    save_image(image, TEST_USER_ID)
                 self.assertEqual(error.exception.status_code, 400)
-            self.assertIsNone(save_image(None))
-            delete_image(None)
+            self.assertIsNone(save_image(None, TEST_USER_ID))
+            delete_image(None, TEST_USER_ID)
             factory.assert_not_called()
 
     def test_local_filename_collision_does_not_remove_existing_image(self):
         with tempfile.TemporaryDirectory() as directory:
             storage = LocalImageStorage(Path(directory))
             filename = f"{uuid4()}.jpeg"
-            storage.save(self.image(), filename)
+            storage.save(self.image(), filename, TEST_USER_ID)
             with self.assertRaises(FileExistsError):
-                storage.save(self.image(), filename)
-            self.assertEqual((Path(directory) / filename).read_bytes(), b"image-content")
+                storage.save(self.image(), filename, TEST_USER_ID)
+            self.assertEqual((Path(directory) / str(TEST_USER_ID) / filename).read_bytes(), b"image-content")
 
-    def test_public_url_length_does_not_require_schema_change(self):
+    def test_object_key_length_does_not_depend_on_origin_length(self):
         storage = SupabaseImageStorage("https://" + "x" * 220 + ".example", FAKE_SECRET, "clothing-images",
-                                       httpx.MockTransport(lambda request: self.fail("Must fail before uploading")))
-        with self.assertRaises(HTTPException) as error:
-            storage.save(self.image(), f"{uuid4()}.jpeg")
-        self.assertEqual(error.exception.status_code, 400)
+                                       httpx.MockTransport(lambda request: httpx.Response(200, json={})))
+        key = storage.save(self.image(), f"{uuid4()}.jpeg", TEST_USER_ID)
+        self.assertLess(len(key), 255)
 
 
 class SchemaMigrationTests(unittest.TestCase):
@@ -307,6 +305,7 @@ class SchemaMigrationTests(unittest.TestCase):
             self.assertEqual(row["season"], " Summer ")
             self.assertEqual(json.loads(row["seasons"]), ["summer"])
             self.assertIsNone(row["style"])
+            self.assertIsNone(row["owner_id"])
 
     def test_existing_metadata_and_images_are_not_overwritten(self):
         engine = create_engine("sqlite://")
@@ -353,6 +352,7 @@ class SchemaMigrationTests(unittest.TestCase):
         self.assertIn("SERIAL", ddl)
         self.assertIn("seasons VARCHAR(255)", ddl)
         self.assertIn("image_path VARCHAR(255)", ddl)
+        self.assertIn("owner_id UUID", ddl)
         self.assertNotIn("PRAGMA", ddl)
         self.assertNotIn("DROP", ddl)
 
@@ -400,11 +400,19 @@ class RemotePersistenceAPITests(unittest.TestCase):
         adapter = patch("app.services.image_service.get_image_storage", return_value=self.storage)
         adapter.start()
         self.addCleanup(adapter.stop)
+        image_adapter = patch("app.routers.clothes.get_image_storage", return_value=self.storage)
+        image_adapter.start()
+        self.addCleanup(image_adapter.stop)
         self.client = TestClient(app)
         self.addCleanup(self.client.close)
 
     def handle_storage(self, request):
         prefix = "/storage/v1/object/clothing-images/"
+        if request.method == "GET":
+            key = request.url.path.removeprefix("/storage/v1/object/authenticated/clothing-images/")
+            if key not in self.objects:
+                return httpx.Response(404, json={"code": "NoSuchKey"})
+            return httpx.Response(200, content=b"photo", headers={"content-type": "image/jpeg"})
         if request.method == "POST":
             if self.fail_upload:
                 return httpx.Response(503, json={"message": "offline"})
@@ -429,9 +437,10 @@ class RemotePersistenceAPITests(unittest.TestCase):
             self.assertEqual(response.status_code, 200, response.text)
             item = response.json()["clothing"]
             ids.append(item["id"])
-            self.assertTrue(item["image_path"].startswith(self.storage.public_prefix))
+            self.assertEqual(item["image_path"], f"clothes/{item['id']}/image")
             self.assertIsInstance(item["seasons"], list)
             self.assertEqual(self.client.get(f"/clothes/{item['id']}").json(), item)
+            self.assertEqual(self.client.get("/" + item["image_path"]).content, b"photo")
         self.assertEqual(len(self.client.get("/clothes").json()["clothes"]), 4)
         self.assertEqual(len(self.objects), 4)
         before = self.client.get(f"/clothes/{ids[0]}").json()
@@ -444,7 +453,7 @@ class RemotePersistenceAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         recommendation = response.json()["recommendations"][0]
         for role in ("top", "jacket", "bottom", "shoes"):
-            self.assertTrue(recommendation[role]["image_path"].startswith(self.storage.public_prefix))
+            self.assertEqual(recommendation[role]["image_path"], f"clothes/{recommendation[role]['id']}/image")
             self.assertEqual(recommendation[role]["seasons"], ["winter"] if role == "top" else ["spring", "winter"])
         for item_id in ids:
             self.assertEqual(self.client.delete(f"/clothes/{item_id}").status_code, 200)
@@ -482,7 +491,7 @@ class RemotePersistenceAPITests(unittest.TestCase):
         image = UploadFile(BytesIO(b"test"), filename="failed.jpeg", headers=Headers({"content-type": "image/jpeg"}))
         with self.sessions() as db, patch.object(db, "commit", side_effect=SQLAlchemyError("test failure")):
             with self.assertRaises(SQLAlchemyError):
-                create_clothing(db, "Failed", "shirt", "navy", "winter", None,
+                create_clothing(db, TEST_USER_ID, "Failed", "shirt", "navy", "winter", None,
                                 "casual", None, None, 5, image)
         self.assertEqual(self.objects, {})
         self.assertEqual(self.client.get("/clothes").json()["clothes"], [])
@@ -491,7 +500,7 @@ class RemotePersistenceAPITests(unittest.TestCase):
         item = self.create().json()["clothing"]
         with self.sessions() as db, patch.object(db, "flush", side_effect=SQLAlchemyError("test failure")):
             with self.assertRaises(SQLAlchemyError):
-                delete_clothing(db, item["id"])
+                delete_clothing(db, item["id"], TEST_USER_ID)
         self.assertEqual(len(self.objects), 1)
         self.assertEqual(self.client.get(f"/clothes/{item['id']}").status_code, 200)
         self.assertEqual(self.client.delete(f"/clothes/{item['id']}").status_code, 200)

@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from fastapi.testclient import TestClient
+from tests.auth_support import TestClient
 
 from app.main import app
 from app.services.recommendation import (

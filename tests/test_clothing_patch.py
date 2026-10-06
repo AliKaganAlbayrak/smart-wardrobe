@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from fastapi.testclient import TestClient
+from tests.auth_support import TestClient, TEST_USER_ID
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -20,6 +20,7 @@ class ClothingPatchTests(unittest.TestCase):
         self.sessions = sessionmaker(bind=self.engine)
         with self.sessions() as db:
             item = ClothingDB(
+                owner_id=TEST_USER_ID,
                 name="Test Shirt", category="shirt", color="navy", season="spring",
                 seasons=json.dumps(["spring"]), image_path="uploads/keep.jpg",
                 style=None, fit=None, material=None, formality=None,
@@ -62,7 +63,9 @@ class ClothingPatchTests(unittest.TestCase):
         result = response.json()
         self.assertEqual(result["seasons"], ["summer", "spring"])
         self.assertEqual(result["season"], "summer")
-        self.assertEqual(result["image_path"], "uploads/keep.jpg")
+        self.assertEqual(result["image_path"], f"clothes/{self.item_id}/image")
+        with self.sessions() as db:
+            self.assertEqual(db.get(ClothingDB, self.item_id).image_path, "uploads/keep.jpg")
         for field in ("name", "category", "color", "style", "fit", "material", "formality"):
             self.assertEqual(result[field], data[field])
 

@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.orm import Session
+from ..auth import CurrentUser, get_current_user
 
 from ..database import get_db
 from ..schemas import (
@@ -17,6 +18,7 @@ from ..services.clothing_service import (
     serialize_clothing,
     update_clothing,
 )
+from ..services.storage import get_image_storage
 
 
 router = APIRouter()
@@ -35,9 +37,11 @@ def add_clothing(
     formality: int = Form(5, ge=1, le=10),
     image: UploadFile | None = File(None),
     db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
 ):
     new_item = create_clothing(
         db=db,
+        owner_id=user.id,
         name=name,
         category=category,
         color=color,
@@ -62,8 +66,9 @@ def get_clothes(
     color: str | None = None,
     season: str | None = None,
     db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    clothes = list_clothes(db, category=category, color=color, season=season)
+    clothes = list_clothes(db, user.id, category=category, color=color, season=season)
     return {"clothes": [serialize_clothing(item) for item in clothes]}
 
 
@@ -71,8 +76,9 @@ def get_clothes(
 def get_clothing_by_id(
     clothing_id: int,
     db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    clothing = get_clothing(db, clothing_id)
+    clothing = get_clothing(db, clothing_id, user.id)
     return serialize_clothing(clothing)
 
 
@@ -80,8 +86,9 @@ def get_clothing_by_id(
 def delete_clothing_by_id(
     clothing_id: int,
     db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    delete_clothing(db, clothing_id)
+    delete_clothing(db, clothing_id, user.id)
     return {"message": "Kıyafet başarıyla silindi", "id": clothing_id}
 
 
@@ -90,5 +97,13 @@ def patch_clothing(
     clothing_id: int,
     update: ClothingUpdate,
     db: Session = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    return serialize_clothing(update_clothing(db, clothing_id, update))
+    return serialize_clothing(update_clothing(db, clothing_id, update, user.id))
+
+
+@router.get("/clothes/{clothing_id}/image", response_model=None)
+def get_clothing_image(clothing_id: int, db: Session = Depends(get_db),
+                       user: CurrentUser = Depends(get_current_user)):
+    clothing = get_clothing(db, clothing_id, user.id)
+    return get_image_storage().image_response(clothing.image_path, user.id)
